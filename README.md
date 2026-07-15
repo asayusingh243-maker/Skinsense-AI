@@ -34,3 +34,43 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+=======
+# SkinSense AI
+
+> AI-powered skincare assistant that analyzes facial skin from photos and provides personalized skincare recommendations based on computer vision, lifestyle, weather, and budget.
+
+## 🚀 Vision
+
+SkinSense AI is an intelligent skincare platform designed to help users understand their skin better through AI-powered image analysis and personalized recommendations.
+
+Unlike traditional skincare apps, SkinSense AI combines:
+
+- 📸 Facial skin analysis
+- 🧠 Lifestyle questionnaire
+- 🌦 Weather & climate data
+- 💰 Budget-aware recommendations
+- 🧪 Ingredient-based suggestions
+- 📈 Progress tracking
+- 💬 AI Skin Coach
+
+## 🛠 Tech Stack
+
+### Frontend
+- Next.js
+- React
+- Tailwind CSS
+
+### Backend
+- FastAPI
+- PostgreSQL
+- SQLAlchemy
+
+### AI
+- PyTorch
+- OpenCV
+- MediaPipe
+
+## 📌 Status
+
+🚧 Currently under development.
+
