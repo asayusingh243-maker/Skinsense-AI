@@ -1,21 +1,38 @@
 # SkinSense AI
 
-An AI-powered skincare assistant that analyzes facial skin from photos and generates personalized skincare recommendations using computer vision, environmental factors, lifestyle information, and budget preferences.
+> AI-powered skincare assistant that analyzes facial skin from photos and provides personalized skincare recommendations based on computer vision, lifestyle, weather, and budget.
 
-## Features
+## 🚀 Vision
 
-- 📸 AI Skin Analysis
-- 🧠 Intelligent Questionnaire
-- 🌤 Weather-Aware Recommendations
-- 💰 Budget-Based Product Suggestions
-- 📈 Skin Progress Tracking
+SkinSense AI is an intelligent skincare platform designed to help users understand their skin better through AI-powered image analysis and personalized recommendations.
+
+Unlike traditional skincare apps, SkinSense AI combines:
+
+- 📸 Facial skin analysis
+- 🧠 Lifestyle questionnaire
+- 🌦 Weather & climate data
+- 💰 Budget-aware recommendations
+- 🧪 Ingredient-based suggestions
+- 📈 Progress tracking
 - 💬 AI Skin Coach
-- 🧴 Ingredient-Based Recommendations
 
-## Tech Stack
+## 🛠 Tech Stack
 
-- Frontend: Next.js + React
-- Backend: FastAPI
-- AI: PyTorch + OpenCV
-- Database: PostgreSQL
-- Authentication: JWT
+### Frontend
+- Next.js
+- React
+- Tailwind CSS
+
+### Backend
+- FastAPI
+- PostgreSQL
+- SQLAlchemy
+
+### AI
+- PyTorch
+- OpenCV
+- MediaPipe
+
+## 📌 Status
+
+🚧 Currently under development.
