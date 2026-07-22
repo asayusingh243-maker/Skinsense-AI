@@ -1,7 +1,10 @@
 const express = require("express");
+require("dotenv").config();
 const authRoutes = require("./routes/auth");
 const cors = require("cors");
-require("dotenv").config();
+const uploadRoutes = require("./routes/upload");
+const geminiRoutes = require("./routes/gemini");
+
 
 const connectDB = require("./config/db");
 
@@ -15,6 +18,9 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/uploads", express.static("uploads"));
+app.use("/api/gemini", geminiRoutes);
 
 // Test Route
 app.get("/", (req, res) => {
