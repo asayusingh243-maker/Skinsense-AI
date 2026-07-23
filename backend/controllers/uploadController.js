@@ -10,14 +10,22 @@ exports.uploadImage = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Image uploaded successfully",
-      image: req.file.filename,
+
+      // Frontend uses this
+      filename: req.file.filename,
+
+      // Optional (keep if you need it later)
+      imagePath: req.file.path,
     });
+
   } catch (err) {
-    console.log(err);
+
+    console.error(err);
 
     res.status(500).json({
       success: false,
       message: "Server Error",
     });
+
   }
 };
