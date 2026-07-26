@@ -217,6 +217,26 @@ function ProductCard({
   const productImage =
     product.imageUrl || "/products/product-placeholder.png";
 
+  const hasRealProductImage =
+    Boolean(product.imageUrl) &&
+    !product.imageUrl.includes("product-placeholder.png");
+
+  const imageContent = (
+    <img
+      src={productImage}
+      alt={`${product.brand} ${product.name}`}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      className="h-full w-full object-contain"
+      onError={(event) => {
+        event.currentTarget.onerror = null;
+        event.currentTarget.src =
+          "/products/product-placeholder.png";
+      }}
+    />
+  );
+
   const hasDiscount =
     product.originalPrice > 0 &&
     product.price > 0 &&
@@ -227,16 +247,19 @@ function ProductCard({
       {/* Product image */}
 
       <div className="relative flex h-64 items-center justify-center bg-gradient-to-br from-green-50 to-white p-6">
-        <img
-          src={productImage}
-          alt={`${product.brand} ${product.name}`}
-          className="h-full w-full object-contain"
-          onError={(event) => {
-            event.currentTarget.onerror = null;
-            event.currentTarget.src =
-              "/products/product-placeholder.png";
-          }}
-        />
+        {product.buyUrl && hasRealProductImage ? (
+          <a
+            href={product.buyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open product page for ${product.brand} ${product.name}`}
+            className="flex h-full w-full items-center justify-center"
+          >
+            {imageContent}
+          </a>
+        ) : (
+          imageContent
+        )}
 
         {product.category && (
           <span className="absolute left-4 top-4 rounded-full bg-green-600 px-4 py-2 text-xs font-semibold text-white shadow">

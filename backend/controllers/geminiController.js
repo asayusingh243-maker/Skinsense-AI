@@ -263,25 +263,12 @@ const productRecommendationSchema = {
         },
 
         required: [
-          "id",
           "brand",
           "name",
           "category",
-          "size",
           "price",
-          "originalPrice",
           "currency",
-          "seller",
-          "buyUrl",
-          "alternativeSeller",
-          "alternativeBuyUrl",
-          "imageUrl",
           "reason",
-          "matchedConcerns",
-          "keyIngredients",
-          "usage",
-          "warnings",
-          "priceCheckedAt",
         ],
       },
     },
@@ -299,6 +286,88 @@ const productRecommendationSchema = {
   ],
 };
 
+
+
+const productPageLookupSchema = {
+  type: "object",
+  properties: {
+    products: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          productPageUrl: {
+            type: "string",
+            description:
+              "Direct official-brand or trusted Indian retailer page for the exact product. Return an empty string when no exact page is found.",
+          },
+          seller: {
+            type: "string",
+            description:
+              "Brand or retailer name for the returned product page.",
+          },
+        },
+        required: ["id", "productPageUrl", "seller"],
+      },
+    },
+  },
+  required: ["products"],
+};
+const productEnrichmentSchema = {
+  type: "object",
+
+  properties: {
+    products: {
+      type: "array",
+
+      items: {
+        type: "object",
+
+        properties: {
+          id: {
+            type: "string",
+          },
+
+          brand: {
+            type: "string",
+          },
+
+          name: {
+            type: "string",
+          },
+
+          seller: {
+            type: "string",
+          },
+
+          buyUrl: {
+            type: "string",
+            description:
+              "Direct public page for the exact product. Return an empty string if it cannot be verified.",
+          },
+
+          imageUrl: {
+            type: "string",
+            description:
+              "Direct public image URL for the exact product. Return an empty string if it cannot be verified.",
+          },
+        },
+
+        required: [
+          "id",
+          "brand",
+          "name",
+          "seller",
+          "buyUrl",
+          "imageUrl",
+        ],
+      },
+    },
+  },
+
+  required: ["products"],
+};
 /* -------------------------------------------------------------------------- */
 /*                              Helper functions                              */
 /* -------------------------------------------------------------------------- */
@@ -330,24 +399,74 @@ function parseGeminiJson(response, responseName) {
   }
 
   const cleaned = responseText
+    .replace(/^\uFEFF/, "")
     .replace(/```json/gi, "")
     .replace(/```/g, "")
     .trim();
 
+  /*
+    First try parsing the complete response.
+  */
   try {
     return JSON.parse(cleaned);
-  } catch (error) {
-    console.error(
-      `${responseName} returned invalid JSON:`,
-      responseText
-    );
-
-    throw new Error(
-      `${responseName} returned invalid JSON.`
-    );
+  } catch {
+    // Continue and try extracting the JSON object.
   }
-}
 
+  /*
+    Gemini may occasionally add explanatory text before
+    or after the JSON. Extract the outermost JSON object.
+  */
+  const firstObjectBracket = cleaned.indexOf("{");
+  const lastObjectBracket = cleaned.lastIndexOf("}");
+
+  if (
+    firstObjectBracket !== -1 &&
+    lastObjectBracket > firstObjectBracket
+  ) {
+    const possibleObject = cleaned.slice(
+      firstObjectBracket,
+      lastObjectBracket + 1
+    );
+
+    try {
+      return JSON.parse(possibleObject);
+    } catch {
+      // Continue to the final error.
+    }
+  }
+
+  /*
+    Also support a top-level JSON array if one is ever returned.
+  */
+  const firstArrayBracket = cleaned.indexOf("[");
+  const lastArrayBracket = cleaned.lastIndexOf("]");
+
+  if (
+    firstArrayBracket !== -1 &&
+    lastArrayBracket > firstArrayBracket
+  ) {
+    const possibleArray = cleaned.slice(
+      firstArrayBracket,
+      lastArrayBracket + 1
+    );
+
+    try {
+      return JSON.parse(possibleArray);
+    } catch {
+      // Continue to the final error.
+    }
+  }
+
+  console.error(
+    `${responseName} returned invalid JSON:`,
+    cleaned.slice(0, 3000)
+  );
+
+  throw new Error(
+    `${responseName} returned invalid JSON.`
+  );
+}
 function safeHttpUrl(value) {
   if (
     typeof value !== "string" ||
@@ -370,6 +489,17 @@ function safeHttpUrl(value) {
   } catch {
     return "";
   }
+}
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item) => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function createProductId(product, index) {
@@ -554,6 +684,264 @@ function normalizeProducts(products) {
     );
 }
 
+
+
+function safePublicProductUrl(value) {
+  const safeUrl = safeHttpUrl(value);
+
+  if (!safeUrl) {
+    return "";
+  }
+
+  try {
+    const parsedUrl = new URL(safeUrl);
+    const hostname = parsedUrl.hostname.toLowerCase();
+
+    const isPrivateHost =
+      hostname === "localhost" ||
+      hostname === "0.0.0.0" ||
+      hostname === "::1" ||
+      hostname.endsWith(".local") ||
+      hostname.startsWith("127.") ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("169.254.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+
+    return isPrivateHost ? "" : parsedUrl.toString();
+  } catch {
+    return "";
+  }
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function extractMetaContent(html, attributeName, attributeValue) {
+  const escapedName = attributeName.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+
+  const escapedValue = attributeValue.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+
+  const patterns = [
+    new RegExp(
+      `<meta[^>]+${escapedName}=["']${escapedValue}["'][^>]+content=["']([^"']+)["'][^>]*>`,
+      "i"
+    ),
+    new RegExp(
+      `<meta[^>]+content=["']([^"']+)["'][^>]+${escapedName}=["']${escapedValue}["'][^>]*>`,
+      "i"
+    ),
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+
+    if (match?.[1]) {
+      return decodeHtmlEntities(match[1].trim());
+    }
+  }
+
+  return "";
+}
+
+async function fetchProductPageImage(productPageUrl) {
+  const safePageUrl = safePublicProductUrl(productPageUrl);
+
+  if (!safePageUrl) {
+    return "";
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(safePageUrl, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+      },
+    });
+
+    if (!response.ok) {
+      return "";
+    }
+
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    if (!contentType.toLowerCase().includes("text/html")) {
+      return "";
+    }
+
+    const html = await response.text();
+
+    const rawImageUrl =
+      extractMetaContent(html, "property", "og:image:secure_url") ||
+      extractMetaContent(html, "property", "og:image") ||
+      extractMetaContent(html, "name", "twitter:image") ||
+      extractMetaContent(html, "name", "twitter:image:src");
+
+    if (!rawImageUrl) {
+      return "";
+    }
+
+    try {
+      return safeHttpUrl(
+        new URL(rawImageUrl, response.url || safePageUrl).toString()
+      );
+    } catch {
+      return "";
+    }
+  } catch (error) {
+    console.warn(
+      "Could not read product image metadata:",
+      getErrorMessage(error)
+    );
+
+    return "";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function findExactProductPages(products) {
+  if (!Array.isArray(products) || products.length === 0) {
+    return [];
+  }
+
+  const lookupItems = products.map((product) => ({
+    id: product.id,
+    brand: product.brand,
+    name: product.name,
+    size: product.size || "",
+  }));
+
+  const prompt = `
+Search for the exact public product page for every skincare product below.
+
+Products:
+${JSON.stringify(lookupItems, null, 2)}
+
+Rules:
+- Return one record for every supplied id.
+- Prefer the official brand website.
+- Otherwise use a trusted Indian retailer such as Nykaa, Tira, Purplle, Amazon India only when the exact product and seller are clear.
+- The productPageUrl must be a direct page for the exact named product, not a homepage or search-results page.
+- Match the brand, full product name and size whenever possible.
+- Do not invent URLs.
+- Return an empty productPageUrl and seller when no exact page can be verified.
+`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      tools: [
+        { googleSearch: {} },
+        { urlContext: {} },
+      ],
+      responseFormat: {
+        text: {
+          mimeType: "application/json",
+          schema: productPageLookupSchema,
+        },
+      },
+    },
+  });
+
+  const result = parseGeminiJson(
+    response,
+    "Product page lookup"
+  );
+
+  return Array.isArray(result.products)
+    ? result.products
+    : [];
+}
+
+async function enrichProductsWithImages(products) {
+  if (!Array.isArray(products) || products.length === 0) {
+    return products;
+  }
+
+  const needsLookup = products.filter(
+    (product) =>
+      !safePublicProductUrl(product.buyUrl) ||
+      !safeHttpUrl(product.imageUrl) ||
+      product.imageUrl === FALLBACK_PRODUCT_IMAGE
+  );
+
+  let lookupResults = [];
+
+  if (needsLookup.length > 0) {
+    try {
+      lookupResults = await findExactProductPages(needsLookup);
+    } catch (error) {
+      console.error(
+        "Product page lookup error:",
+        getErrorMessage(error)
+      );
+    }
+  }
+
+  const lookupById = new Map(
+    lookupResults.map((item) => [String(item.id || ""), item])
+  );
+
+  return Promise.all(
+    products.map(async (product) => {
+      const lookup = lookupById.get(product.id) || {};
+
+      const productPageUrl =
+        safePublicProductUrl(product.buyUrl) ||
+        safePublicProductUrl(lookup.productPageUrl);
+
+      const currentImageUrl =
+        product.imageUrl !== FALLBACK_PRODUCT_IMAGE
+          ? safeHttpUrl(product.imageUrl)
+          : "";
+
+      const fetchedImageUrl = currentImageUrl
+        ? ""
+        : await fetchProductPageImage(productPageUrl);
+
+      const verifiedSeller =
+        typeof lookup.seller === "string"
+          ? lookup.seller.trim()
+          : "";
+
+      return {
+        ...product,
+        buyUrl: productPageUrl || product.buyUrl,
+        seller:
+          product.seller &&
+          product.seller !== "Check official retailer"
+            ? product.seller
+            : verifiedSeller || product.seller,
+        imageUrl:
+          currentImageUrl ||
+          fetchedImageUrl ||
+          FALLBACK_PRODUCT_IMAGE,
+      };
+    })
+  );
+}
+
 function extractSearchSources(response) {
   const sources = [];
 
@@ -620,6 +1008,157 @@ function extractSearchSources(response) {
   }
 
   return uniqueSources.slice(0, 15);
+}
+async function enrichProductsWithSearch(products) {
+  if (!Array.isArray(products) || products.length === 0) {
+    return {
+      products: [],
+      sources: [],
+    };
+  }
+
+  const productsToFind = products.map((product) => ({
+    id: product.id,
+    brand: product.brand,
+    name: product.name,
+  }));
+
+  const enrichmentPrompt = `
+Search for the exact skincare products listed below.
+
+Products:
+
+${JSON.stringify(productsToFind, null, 2)}
+
+For every product:
+
+- Keep the same id, brand and product name.
+- Search for the exact product sold in India.
+- Prefer the official brand website.
+- If the official website is unavailable, use a trusted Indian retailer.
+- The buyUrl must be a direct product-detail page.
+- Do not return a homepage, category page or search-results page.
+- The imageUrl must be a direct publicly accessible image of the exact product.
+- Prefer the product page's main image, og:image or twitter:image.
+- Do not use a logo, banner, unrelated image or generic category image.
+- Do not invent URLs.
+- Return an empty string if the product page or image cannot be verified.
+- Return one result for every supplied product.
+`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+
+    contents: enrichmentPrompt,
+
+    config: {
+      tools: [
+        {
+          googleSearch: {},
+        },
+        {
+          urlContext: {},
+        },
+      ],
+
+      responseFormat: {
+        text: {
+          mimeType: "application/json",
+          schema: productEnrichmentSchema,
+        },
+      },
+    },
+  });
+
+  const enrichmentResult = parseGeminiJson(
+    response,
+    "Product image and link enrichment"
+  );
+
+  const enrichedProducts = Array.isArray(
+    enrichmentResult.products
+  )
+    ? enrichmentResult.products
+    : [];
+
+  const enrichedById = new Map(
+    enrichedProducts.map((product) => [
+      String(product.id || "").trim(),
+      product,
+    ])
+  );
+
+  const mergedProducts = products.map((product) => {
+    let enrichedProduct = enrichedById.get(product.id);
+
+    /*
+      If Gemini changes or omits the id, try matching
+      using brand and product name.
+    */
+    if (!enrichedProduct) {
+      enrichedProduct = enrichedProducts.find((candidate) => {
+        const candidateBrand = String(
+          candidate.brand || ""
+        )
+          .trim()
+          .toLowerCase();
+
+        const candidateName = String(
+          candidate.name || ""
+        )
+          .trim()
+          .toLowerCase();
+
+        return (
+          candidateBrand ===
+            product.brand.trim().toLowerCase() &&
+          candidateName ===
+            product.name.trim().toLowerCase()
+        );
+      });
+    }
+
+    if (!enrichedProduct) {
+      return product;
+    }
+
+    const verifiedBuyUrl = safeHttpUrl(
+      enrichedProduct.buyUrl
+    );
+
+    const verifiedImageUrl = safeHttpUrl(
+      enrichedProduct.imageUrl
+    );
+
+    const verifiedSeller =
+      typeof enrichedProduct.seller === "string"
+        ? enrichedProduct.seller.trim()
+        : "";
+
+    return {
+      ...product,
+
+      seller:
+        verifiedSeller ||
+        product.seller ||
+        "Check official retailer",
+
+      buyUrl:
+        verifiedBuyUrl ||
+        product.buyUrl ||
+        "",
+
+      imageUrl:
+        verifiedImageUrl ||
+        product.imageUrl ||
+        FALLBACK_PRODUCT_IMAGE,
+    };
+  });
+
+  return {
+    products: mergedProducts,
+    sources: extractSearchSources(response),
+  };
 }
 
 function getErrorMessage(error) {
@@ -815,11 +1354,8 @@ Important rules:
         ],
 
         config: {
-          responseMimeType:
-            "application/json",
-
-          responseSchema:
-            skinAnalysisSchema,
+          responseMimeType: "application/json",
+          responseSchema: skinAnalysisSchema,
         },
       });
 
@@ -928,17 +1464,14 @@ Search and recommendation rules:
               {
                 googleSearch: {},
               },
-
-              {
-                urlContext: {},
-              },
             ],
 
-            responseMimeType:
-              "application/json",
-
-            responseSchema:
-              productRecommendationSchema,
+            responseFormat: {
+              text: {
+                mimeType: "application/json",
+                schema: productRecommendationSchema,
+              },
+            },
           },
         });
 
@@ -952,10 +1485,17 @@ Search and recommendation rules:
         extractSearchSources(
           productResponse
         );
+
+      console.log(
+        "Gemini product search returned:",
+        Array.isArray(productResult.products)
+          ? `${productResult.products.length} product(s)`
+          : "no products array"
+      );
     } catch (productError) {
       console.error(
         "Live product search error:",
-        productError
+        getErrorMessage(productError)
       );
 
       productSearchUnavailable =
@@ -967,43 +1507,224 @@ Search and recommendation rules:
         )
       ) {
         productSearchMessage =
-          "Your skin analysis was completed, but live product search is temporarily unavailable because the Gemini API quota was exhausted. Please try product search again after the quota resets.";
-
-        productResult = {
-          detectedBudget:
-            questionnaireBudget,
-
-          budgetStatus:
-            "Live product search unavailable",
-
-          products: [],
-
-          priceDisclaimer:
-            "Live prices, sellers and product availability could not be verified because the Gemini product-search quota was exhausted.",
-        };
+          "Live product verification is temporarily unavailable because the Gemini API quota was exhausted. AI-generated product suggestions are shown below; verify prices and availability before purchase.";
       } else {
         productSearchMessage =
-          "Your skin analysis was completed, but live products, prices and sellers could not be verified at this time.";
-
-        productResult = {
-          detectedBudget:
-            questionnaireBudget,
-
-          budgetStatus:
-            "Live product search unavailable",
-
-          products: [],
-
-          priceDisclaimer:
-            "Live prices, sellers and product availability could not be verified because the product search failed.",
-        };
+          "Live product verification is temporarily unavailable. AI-generated product suggestions are shown below; verify prices and availability before purchase.";
       }
     }
 
-    const products =
+    let products =
       normalizeProducts(
         productResult.products
       );
+
+    /*
+      If the grounded search fails or returns no usable products,
+      ask Gemini for dynamic, non-hardcoded suggestions without
+      live-search claims. This keeps the product section useful
+      while clearly marking prices and links as unverified.
+    */
+    if (products.length === 0) {
+      try {
+        const fallbackPrompt = `
+Create a personalized skincare product routine for this user.
+
+Skin analysis:
+${JSON.stringify(
+  skinAnalysis,
+  null,
+  2
+)}
+
+Questionnaire:
+${JSON.stringify(
+  questionnaire,
+  null,
+  2
+)}
+
+Total budget:
+${
+  questionnaireBudget > 0
+    ? `₹${questionnaireBudget}`
+    : "Not clearly provided"
+}
+
+Rules:
+- Recommend 2 to 4 real, commonly available skincare products in India.
+- Choose products dynamically from different suitable brands.
+- Keep the complete routine within the total budget when one is provided.
+- Prioritize cleanser, moisturizer and sunscreen for a limited budget.
+- Do not recommend prescription medicines.
+- Use cautious cosmetic guidance only.
+- Prices may be approximate; use a realistic INR estimate.
+- Leave buyUrl, alternativeBuyUrl and imageUrl empty when they are not verified. A separate grounded lookup will try to add the exact product page and product image.
+- Set seller to "Check official retailer".
+- Explain why each product suits the user's visible skin needs and questionnaire answers.
+- Include usage guidance and patch-test warnings.
+`;
+
+        const fallbackResponse =
+          await ai.models.generateContent({
+            model: MODEL,
+            contents: fallbackPrompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: productRecommendationSchema,
+            },
+          });
+
+        const fallbackResult =
+          parseGeminiJson(
+            fallbackResponse,
+            "AI product fallback"
+          );
+
+        products =
+          normalizeProducts(
+            fallbackResult.products
+          );
+
+        if (products.length > 0) {
+          productResult = {
+            ...fallbackResult,
+            detectedBudget:
+              questionnaireBudget ||
+              Number(
+                fallbackResult.detectedBudget
+              ) ||
+              0,
+            budgetStatus:
+              "AI suggestions — verify current prices",
+            priceDisclaimer:
+              "These products were selected dynamically by AI, but live prices, sellers and purchase links were not verified. Check an official retailer before buying.",
+          };
+
+          productSearchUnavailable =
+            true;
+
+          if (!productSearchMessage) {
+            productSearchMessage =
+              "Live product verification returned no usable products, so AI-generated suggestions are shown instead.";
+          }
+        }
+      } catch (fallbackError) {
+        console.error(
+          "AI product fallback error:",
+          getErrorMessage(
+            fallbackError
+          )
+        );
+
+        productSearchUnavailable =
+          true;
+
+        if (!productSearchMessage) {
+          productSearchMessage =
+            "Products could not be generated at this time. Please try again later.";
+        }
+      }
+    }
+
+
+
+    products = await enrichProductsWithImages(products);
+    /*
+  Stage 3: Enrich AI-selected products with
+  verified purchase pages and product images.
+*/
+const needsProductEnrichment = products.some(
+  (product) =>
+    !product.buyUrl ||
+    !product.imageUrl ||
+    product.imageUrl === FALLBACK_PRODUCT_IMAGE
+);
+
+if (
+  products.length > 0 &&
+  needsProductEnrichment
+) {
+  try {
+    console.log(
+      "Searching for product images and purchase links..."
+    );
+
+    const enrichment =
+      await enrichProductsWithSearch(products);
+
+    if (
+      Array.isArray(enrichment.products) &&
+      enrichment.products.length > 0
+    ) {
+      products = enrichment.products;
+    }
+
+    /*
+      Merge and remove duplicate search sources.
+    */
+    const combinedSources = [
+      ...productSources,
+      ...(Array.isArray(enrichment.sources)
+        ? enrichment.sources
+        : []),
+    ];
+
+    const seenSourceUrls = new Set();
+
+    productSources = combinedSources
+      .filter((source) => {
+        const sourceUrl =
+          typeof source?.url === "string"
+            ? source.url.trim()
+            : "";
+
+        if (
+          !sourceUrl ||
+          seenSourceUrls.has(sourceUrl)
+        ) {
+          return false;
+        }
+
+        seenSourceUrls.add(sourceUrl);
+        return true;
+      })
+      .slice(0, 15);
+
+    const productsWithImages =
+      products.filter(
+        (product) =>
+          product.imageUrl &&
+          product.imageUrl !==
+            FALLBACK_PRODUCT_IMAGE
+      ).length;
+
+    const productsWithLinks =
+      products.filter(
+        (product) => Boolean(product.buyUrl)
+      ).length;
+
+    console.log(
+      `Product enrichment completed: ${productsWithImages}/${products.length} image(s), ${productsWithLinks}/${products.length} purchase link(s).`
+    );
+  } catch (enrichmentError) {
+    /*
+      Do not fail the entire analysis if product
+      image or link lookup fails.
+    */
+    console.error(
+      "Product enrichment error:",
+      getErrorMessage(enrichmentError)
+    );
+
+    productSearchUnavailable = true;
+
+    if (!productSearchMessage) {
+      productSearchMessage =
+        "Products were generated, but some product images or purchase links could not be verified.";
+    }
+  }
+}
 
     const calculatedRoutineTotal =
       products.reduce(
