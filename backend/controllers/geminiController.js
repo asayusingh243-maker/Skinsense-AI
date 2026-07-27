@@ -2,116 +2,181 @@ const { GoogleGenAI } = require("@google/genai");
 const fs = require("fs");
 const path = require("path");
 const mime = require("mime-types");
+const productCatalog = require("../data/productCatalog");
+
+const { analyzeSkinImage } = require("../services/analysisService");
+const { buildRoutine } = require("../services/routineBuilder");
+const { selectProductsForRoutine } = require("../services/productSelector");
+const { validateRoutineSafety } = require("../services/safetyEngine");
+const { optimizeRoutineForBudget } = require("../services/budgetEngine");
+const { applyWeatherGuidance } = require("../services/weatherEngine");
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
-const MODEL =
-  process.env.GEMINI_MODEL || "gemini-3.6-flash";
+const ANALYSIS_MODEL =
+  process.env.GEMINI_ANALYSIS_MODEL ||
+  process.env.GEMINI_MODEL ||
+  "gemini-3.6-flash";
+
 
 const FALLBACK_PRODUCT_IMAGE =
   "/products/product-placeholder.png";
 
+const productImageCache = new Map();
+
 /* -------------------------------------------------------------------------- */
-/*                         Skin analysis response schema                       */
+/*                                  Schemas                                   */
 /* -------------------------------------------------------------------------- */
 
-const skinAnalysisSchema = {
+const fallbackProductSchema = {
   type: "object",
-
   properties: {
-    skinType: {
-      type: "string",
-      description:
-        "Likely visible skin type, such as oily, dry, combination, normal or sensitive.",
-    },
-
-    skinTone: {
+    id: {
       type: "string",
     },
-
-    undertone: {
+    brand: {
       type: "string",
     },
-
-    skinScore: {
+    name: {
+      type: "string",
+    },
+    category: {
+      type: "string",
+    },
+    size: {
+      type: "string",
+    },
+    price: {
       type: "integer",
       description:
-        "A general cosmetic skin-wellness score from 0 to 100. It is not a medical score.",
+        "Approximate price in Indian rupees. Use 0 when unknown.",
     },
-
-    skinAge: {
+    currency: {
       type: "string",
     },
-
-    acne: {
+    reason: {
       type: "string",
     },
-
-    pigmentation: {
-      type: "string",
-    },
-
-    pores: {
-      type: "string",
-    },
-
-    hydration: {
-      type: "string",
-    },
-
-    oiliness: {
-      type: "string",
-    },
-
-    sensitivity: {
-      type: "string",
-    },
-
-    mainConcerns: {
+    matchedConcerns: {
       type: "array",
       items: {
         type: "string",
       },
     },
-
-    morningRoutine: {
+    keyIngredients: {
       type: "array",
       items: {
         type: "string",
       },
     },
-
-    nightRoutine: {
-      type: "array",
-      items: {
-        type: "string",
-      },
+    usage: {
+      type: "string",
     },
-
-    foods: {
-      type: "array",
-      items: {
-        type: "string",
-      },
-    },
-
-    ingredients: {
-      type: "array",
-      items: {
-        type: "string",
-      },
-    },
-
-    avoidIngredients: {
+    warnings: {
       type: "array",
       items: {
         type: "string",
       },
     },
   },
+  required: [
+    "brand",
+    "name",
+    "category",
+    "price",
+    "currency",
+    "reason",
+  ],
+};
 
+const skinAnalysisSchema = {
+  type: "object",
+  properties: {
+    skinType: {
+      type: "string",
+      description:
+        "Likely visible skin type, such as oily, dry, combination, normal or sensitive.",
+    },
+    skinTone: {
+      type: "string",
+    },
+    undertone: {
+      type: "string",
+    },
+    skinScore: {
+      type: "integer",
+      description:
+        "A general cosmetic skin-wellness score from 0 to 100. It is not a medical score.",
+    },
+    skinAge: {
+      type: "string",
+    },
+    acne: {
+      type: "string",
+    },
+    pigmentation: {
+      type: "string",
+    },
+    pores: {
+      type: "string",
+    },
+    hydration: {
+      type: "string",
+    },
+    oiliness: {
+      type: "string",
+    },
+    sensitivity: {
+      type: "string",
+    },
+    mainConcerns: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+    morningRoutine: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+    nightRoutine: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+    foods: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+    ingredients: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+    avoidIngredients: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+
+    /*
+      These suggestions are produced in the first Gemini request.
+      They are only used if the grounded product-search request fails.
+    */
+    fallbackProducts: {
+      type: "array",
+      items: fallbackProductSchema,
+    },
+  },
   required: [
     "skinType",
     "skinTone",
@@ -130,154 +195,130 @@ const skinAnalysisSchema = {
     "foods",
     "ingredients",
     "avoidIngredients",
+    "fallbackProducts",
   ],
 };
 
-/* -------------------------------------------------------------------------- */
-/*                      Product recommendation response schema                */
-/* -------------------------------------------------------------------------- */
-
 const productRecommendationSchema = {
   type: "object",
-
   properties: {
     detectedBudget: {
       type: "integer",
       description:
         "Total skincare budget in Indian rupees. Return 0 if it was not provided.",
     },
-
     budgetStatus: {
       type: "string",
       description:
-        "Whether the complete recommended routine is within the user's budget.",
+        "Whether the complete recommended routine is within the user's total budget.",
     },
-
     products: {
       type: "array",
-
       items: {
         type: "object",
-
         properties: {
           id: {
             type: "string",
           },
-
           brand: {
             type: "string",
           },
-
           name: {
             type: "string",
           },
-
           category: {
             type: "string",
-            description:
-              "For example: cleanser, moisturizer, sunscreen, serum or treatment.",
           },
-
           size: {
             type: "string",
-            description:
-              "Product size such as 50 ml. Use an empty string when unavailable.",
           },
-
           price: {
             type: "integer",
             description:
               "Current displayed selling price in Indian rupees. Return 0 when it cannot be verified.",
           },
-
           originalPrice: {
             type: "integer",
             description:
               "Original MRP in Indian rupees. Return 0 when unavailable.",
           },
-
           currency: {
             type: "string",
           },
-
           seller: {
             type: "string",
           },
-
           buyUrl: {
             type: "string",
             description:
-              "Direct URL of the selected product page.",
+              "Direct product-detail page for the exact product. Use an empty string when it cannot be verified.",
           },
-
           alternativeSeller: {
             type: "string",
           },
-
           alternativeBuyUrl: {
             type: "string",
           },
-
           imageUrl: {
             type: "string",
             description:
-              "Direct image URL for the exact recommended product. Use an empty string when unavailable.",
+              "Direct public image URL for the exact product. Use an empty string when it cannot be verified.",
           },
-
           reason: {
             type: "string",
-            description:
-              "Personalized explanation based on skin type, concerns, sensitivity, lifestyle and budget.",
           },
-
           matchedConcerns: {
             type: "array",
             items: {
               type: "string",
             },
           },
-
           keyIngredients: {
             type: "array",
             items: {
               type: "string",
             },
           },
-
           usage: {
             type: "string",
           },
-
           warnings: {
             type: "array",
             items: {
               type: "string",
             },
           },
-
           priceCheckedAt: {
             type: "string",
-            description:
-              "Date or date-time when the price was checked.",
           },
         },
-
         required: [
+          "id",
           "brand",
           "name",
           "category",
+          "size",
           "price",
+          "originalPrice",
           "currency",
+          "seller",
+          "buyUrl",
+          "alternativeSeller",
+          "alternativeBuyUrl",
+          "imageUrl",
           "reason",
+          "matchedConcerns",
+          "keyIngredients",
+          "usage",
+          "warnings",
+          "priceCheckedAt",
         ],
       },
     },
-
     priceDisclaimer: {
       type: "string",
     },
   },
-
   required: [
     "detectedBudget",
     "budgetStatus",
@@ -286,88 +327,6 @@ const productRecommendationSchema = {
   ],
 };
 
-
-
-const productPageLookupSchema = {
-  type: "object",
-  properties: {
-    products: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          productPageUrl: {
-            type: "string",
-            description:
-              "Direct official-brand or trusted Indian retailer page for the exact product. Return an empty string when no exact page is found.",
-          },
-          seller: {
-            type: "string",
-            description:
-              "Brand or retailer name for the returned product page.",
-          },
-        },
-        required: ["id", "productPageUrl", "seller"],
-      },
-    },
-  },
-  required: ["products"],
-};
-const productEnrichmentSchema = {
-  type: "object",
-
-  properties: {
-    products: {
-      type: "array",
-
-      items: {
-        type: "object",
-
-        properties: {
-          id: {
-            type: "string",
-          },
-
-          brand: {
-            type: "string",
-          },
-
-          name: {
-            type: "string",
-          },
-
-          seller: {
-            type: "string",
-          },
-
-          buyUrl: {
-            type: "string",
-            description:
-              "Direct public page for the exact product. Return an empty string if it cannot be verified.",
-          },
-
-          imageUrl: {
-            type: "string",
-            description:
-              "Direct public image URL for the exact product. Return an empty string if it cannot be verified.",
-          },
-        },
-
-        required: [
-          "id",
-          "brand",
-          "name",
-          "seller",
-          "buyUrl",
-          "imageUrl",
-        ],
-      },
-    },
-  },
-
-  required: ["products"],
-};
 /* -------------------------------------------------------------------------- */
 /*                              Helper functions                              */
 /* -------------------------------------------------------------------------- */
@@ -404,19 +363,12 @@ function parseGeminiJson(response, responseName) {
     .replace(/```/g, "")
     .trim();
 
-  /*
-    First try parsing the complete response.
-  */
   try {
     return JSON.parse(cleaned);
   } catch {
-    // Continue and try extracting the JSON object.
+    // Try extracting an object from explanatory text.
   }
 
-  /*
-    Gemini may occasionally add explanatory text before
-    or after the JSON. Extract the outermost JSON object.
-  */
   const firstObjectBracket = cleaned.indexOf("{");
   const lastObjectBracket = cleaned.lastIndexOf("}");
 
@@ -424,35 +376,13 @@ function parseGeminiJson(response, responseName) {
     firstObjectBracket !== -1 &&
     lastObjectBracket > firstObjectBracket
   ) {
-    const possibleObject = cleaned.slice(
-      firstObjectBracket,
-      lastObjectBracket + 1
-    );
-
     try {
-      return JSON.parse(possibleObject);
-    } catch {
-      // Continue to the final error.
-    }
-  }
-
-  /*
-    Also support a top-level JSON array if one is ever returned.
-  */
-  const firstArrayBracket = cleaned.indexOf("[");
-  const lastArrayBracket = cleaned.lastIndexOf("]");
-
-  if (
-    firstArrayBracket !== -1 &&
-    lastArrayBracket > firstArrayBracket
-  ) {
-    const possibleArray = cleaned.slice(
-      firstArrayBracket,
-      lastArrayBracket + 1
-    );
-
-    try {
-      return JSON.parse(possibleArray);
+      return JSON.parse(
+        cleaned.slice(
+          firstObjectBracket,
+          lastObjectBracket + 1
+        )
+      );
     } catch {
       // Continue to the final error.
     }
@@ -467,6 +397,7 @@ function parseGeminiJson(response, responseName) {
     `${responseName} returned invalid JSON.`
   );
 }
+
 function safeHttpUrl(value) {
   if (
     typeof value !== "string" ||
@@ -491,13 +422,368 @@ function safeHttpUrl(value) {
   }
 }
 
+function safeImageUrl(value) {
+  if (
+    typeof value === "string" &&
+    value.trim().startsWith("/")
+  ) {
+    return value.trim();
+  }
+
+  return safeHttpUrl(value);
+}
+
+function safePublicProductUrl(value) {
+  const safeUrl = safeHttpUrl(value);
+
+  if (!safeUrl) {
+    return "";
+  }
+
+  try {
+    const parsedUrl = new URL(safeUrl);
+    const hostname =
+      parsedUrl.hostname.toLowerCase();
+
+    const isPrivateHost =
+      hostname === "localhost" ||
+      hostname === "0.0.0.0" ||
+      hostname === "::1" ||
+      hostname.endsWith(".local") ||
+      hostname.startsWith("127.") ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("169.254.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(
+        hostname
+      );
+
+    return isPrivateHost
+      ? ""
+      : parsedUrl.toString();
+  } catch {
+    return "";
+  }
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function extractMetaContent(
+  html,
+  attributeName,
+  attributeValue
+) {
+  const escapedName =
+    attributeName.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+  const escapedValue =
+    attributeValue.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+  const patterns = [
+    new RegExp(
+      `<meta[^>]+${escapedName}=["']${escapedValue}["'][^>]+content=["']([^"']+)["'][^>]*>`,
+      "i"
+    ),
+    new RegExp(
+      `<meta[^>]+content=["']([^"']+)["'][^>]+${escapedName}=["']${escapedValue}["'][^>]*>`,
+      "i"
+    ),
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+
+    if (match?.[1]) {
+      return decodeHtmlEntities(
+        match[1].trim()
+      );
+    }
+  }
+
+  return "";
+}
+
+function findImageInJsonLd(value) {
+  if (!value) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return safeHttpUrl(value);
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const image =
+        findImageInJsonLd(item);
+
+      if (image) {
+        return image;
+      }
+    }
+
+    return "";
+  }
+
+  if (typeof value !== "object") {
+    return "";
+  }
+
+  const preferredFields = [
+    "image",
+    "primaryImageOfPage",
+    "thumbnailUrl",
+    "contentUrl",
+  ];
+
+  for (const field of preferredFields) {
+    if (!(field in value)) {
+      continue;
+    }
+
+    const image =
+      findImageInJsonLd(value[field]);
+
+    if (image) {
+      return image;
+    }
+  }
+
+  if (
+    typeof value.url === "string" &&
+    /\.(?:png|jpe?g|webp|avif)(?:\?|$)/i.test(
+      value.url
+    )
+  ) {
+    return safeHttpUrl(value.url);
+  }
+
+  return "";
+}
+
+function extractJsonLdImage(html) {
+  const pattern =
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
+  let match;
+
+  while ((match = pattern.exec(html))) {
+    try {
+      const parsed = JSON.parse(
+        decodeHtmlEntities(
+          match[1].trim()
+        )
+      );
+
+      const image =
+        findImageInJsonLd(parsed);
+
+      if (image) {
+        return image;
+      }
+    } catch {
+      // Ignore malformed JSON-LD blocks.
+    }
+  }
+
+  return "";
+}
+
+async function fetchProductPageImage(
+  productPageUrl
+) {
+  const safePageUrl =
+    safePublicProductUrl(
+      productPageUrl
+    );
+
+  if (!safePageUrl) {
+    return "";
+  }
+
+  if (
+    productImageCache.has(
+      safePageUrl
+    )
+  ) {
+    return (
+      productImageCache.get(
+        safePageUrl
+      ) || ""
+    );
+  }
+
+  const controller =
+    new AbortController();
+
+  const timeout = setTimeout(
+    () => controller.abort(),
+    10000
+  );
+
+  try {
+    const response = await fetch(
+      safePageUrl,
+      {
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      productImageCache.set(
+        safePageUrl,
+        ""
+      );
+
+      return "";
+    }
+
+    const contentType =
+      response.headers.get(
+        "content-type"
+      ) || "";
+
+    if (
+      !contentType
+        .toLowerCase()
+        .includes("text/html")
+    ) {
+      productImageCache.set(
+        safePageUrl,
+        ""
+      );
+
+      return "";
+    }
+
+    const html =
+      await response.text();
+
+    const rawImageUrl =
+      extractMetaContent(
+        html,
+        "property",
+        "og:image:secure_url"
+      ) ||
+      extractMetaContent(
+        html,
+        "property",
+        "og:image"
+      ) ||
+      extractMetaContent(
+        html,
+        "name",
+        "twitter:image"
+      ) ||
+      extractMetaContent(
+        html,
+        "name",
+        "twitter:image:src"
+      ) ||
+      extractJsonLdImage(html);
+
+    if (!rawImageUrl) {
+      productImageCache.set(
+        safePageUrl,
+        ""
+      );
+
+      return "";
+    }
+
+    const resolvedImageUrl =
+      safeHttpUrl(
+        new URL(
+          rawImageUrl,
+          response.url || safePageUrl
+        ).toString()
+      );
+
+    productImageCache.set(
+      safePageUrl,
+      resolvedImageUrl
+    );
+
+    return resolvedImageUrl;
+  } catch (error) {
+    console.warn(
+      "Automatic product image extraction failed:",
+      getErrorMessage(error)
+    );
+
+    productImageCache.set(
+      safePageUrl,
+      ""
+    );
+
+    return "";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function attachAutomaticProductImages(
+  products
+) {
+  if (!Array.isArray(products)) {
+    return [];
+  }
+
+  return Promise.all(
+    products.map(async (product) => {
+      const extractedImageUrl =
+        await fetchProductPageImage(
+          product.buyUrl
+        );
+
+      const existingImageUrl =
+        product.imageUrl !==
+        FALLBACK_PRODUCT_IMAGE
+          ? safeImageUrl(
+              product.imageUrl
+            )
+          : "";
+
+      return {
+        ...product,
+        imageUrl:
+          extractedImageUrl ||
+          existingImageUrl ||
+          FALLBACK_PRODUCT_IMAGE,
+      };
+    })
+  );
+}
+
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value
-    .filter((item) => typeof item === "string")
+    .filter(
+      (item) => typeof item === "string"
+    )
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -510,9 +796,9 @@ function createProductId(product, index) {
     return product.id.trim();
   }
 
-  const value = `${product.brand || "product"}-${
-    product.name || index + 1
-  }`;
+  const value = `${
+    product.brand || "product"
+  }-${product.name || index + 1}`;
 
   return value
     .toLowerCase()
@@ -541,22 +827,28 @@ function extractBudget(questionnaire) {
     }
 
     if (typeof value === "string") {
-      const normalizedValue = value.replace(/,/g, "");
+      const normalizedValue =
+        value.replace(/,/g, "");
 
       const matches =
-        normalizedValue.match(/\d+(?:\.\d+)?/g);
+        normalizedValue.match(
+          /\d+(?:\.\d+)?/g
+        );
 
       if (matches?.length) {
         const amounts = matches
           .map(Number)
           .filter(
             (amount) =>
-              Number.isFinite(amount) && amount > 0
+              Number.isFinite(amount) &&
+              amount > 0
           );
 
         if (amounts.length > 0) {
           // For ₹500–₹1000, use ₹1000 as the total limit.
-          return Math.round(Math.max(...amounts));
+          return Math.round(
+            Math.max(...amounts)
+          );
         }
       }
     }
@@ -579,67 +871,89 @@ function normalizeProducts(products) {
         product.originalPrice
       );
 
+      const warnings =
+        normalizeStringArray(
+          product.warnings
+        );
+
       return {
-        id: createProductId(product, index),
+        id: createProductId(
+          product,
+          index
+        ),
 
         brand:
-          typeof product.brand === "string"
+          typeof product.brand ===
+            "string"
             ? product.brand.trim()
             : "",
 
         name:
-          typeof product.name === "string"
+          typeof product.name ===
+            "string"
             ? product.name.trim()
             : "",
 
         category:
-          typeof product.category === "string"
+          typeof product.category ===
+            "string"
             ? product.category.trim()
             : "",
 
         size:
-          typeof product.size === "string"
+          typeof product.size ===
+            "string"
             ? product.size.trim()
             : "",
 
         price:
-          Number.isFinite(price) && price > 0
+          Number.isFinite(price) &&
+          price > 0
             ? Math.round(price)
             : 0,
 
         originalPrice:
-          Number.isFinite(originalPrice) &&
+          Number.isFinite(
+            originalPrice
+          ) &&
           originalPrice > 0
-            ? Math.round(originalPrice)
+            ? Math.round(
+                originalPrice
+              )
             : 0,
 
         currency: "INR",
 
         seller:
-          typeof product.seller === "string"
+          typeof product.seller ===
+            "string"
             ? product.seller.trim()
             : "",
 
-        buyUrl: safeHttpUrl(
+        buyUrl: safePublicProductUrl(
           product.buyUrl
         ),
 
         alternativeSeller:
           typeof product.alternativeSeller ===
-          "string"
+            "string"
             ? product.alternativeSeller.trim()
             : "",
 
-        alternativeBuyUrl: safeHttpUrl(
-          product.alternativeBuyUrl
-        ),
+        alternativeBuyUrl:
+          safePublicProductUrl(
+            product.alternativeBuyUrl
+          ),
 
         imageUrl:
-          safeHttpUrl(product.imageUrl) ||
+          safeImageUrl(
+            product.imageUrl
+          ) ||
           FALLBACK_PRODUCT_IMAGE,
 
         reason:
-          typeof product.reason === "string" &&
+          typeof product.reason ===
+            "string" &&
           product.reason.trim()
             ? product.reason.trim()
             : "Selected according to your skin analysis and budget.",
@@ -655,24 +969,22 @@ function normalizeProducts(products) {
           ),
 
         usage:
-          typeof product.usage === "string"
+          typeof product.usage ===
+            "string"
             ? product.usage.trim()
             : "",
 
         warnings:
-          normalizeStringArray(
-            product.warnings
-          ).length > 0
-            ? normalizeStringArray(
-                product.warnings
-              )
+          warnings.length > 0
+            ? warnings
             : [
                 "Patch-test before regular use.",
               ],
 
         priceCheckedAt:
           typeof product.priceCheckedAt ===
-          "string"
+            "string" &&
+          product.priceCheckedAt.trim()
             ? product.priceCheckedAt.trim()
             : new Date().toISOString(),
       };
@@ -684,34 +996,78 @@ function normalizeProducts(products) {
     );
 }
 
+function normalizeFallbackProducts(
+  products
+) {
+  return normalizeProducts(
+    Array.isArray(products)
+      ? products.map((product) => ({
+          ...product,
+          originalPrice: 0,
+          seller:
+            "Check official retailer",
+          buyUrl: "",
+          alternativeSeller: "",
+          alternativeBuyUrl: "",
+          imageUrl: "",
+          priceCheckedAt: "",
+        }))
+      : []
+  );
+}
 
-
-function safePublicProductUrl(value) {
-  const safeUrl = safeHttpUrl(value);
-
-  if (!safeUrl) {
-    return "";
-  }
-
-  try {
-    const parsedUrl = new URL(safeUrl);
-    const hostname = parsedUrl.hostname.toLowerCase();
-
-    const isPrivateHost =
-      hostname === "localhost" ||
-      hostname === "0.0.0.0" ||
-      hostname === "::1" ||
-      hostname.endsWith(".local") ||
-      hostname.startsWith("127.") ||
-      hostname.startsWith("10.") ||
-      hostname.startsWith("192.168.") ||
-      hostname.startsWith("169.254.") ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
-
-    return isPrivateHost ? "" : parsedUrl.toString();
-  } catch {
-    return "";
-  }
+function createProductContext(
+  questionnaire
+) {
+  return {
+    age: questionnaire?.age || "",
+    gender:
+      questionnaire?.gender || "",
+    skinFeeling:
+      questionnaire?.skinFeeling || "",
+    acne: questionnaire?.acne || "",
+    pigmentation:
+      questionnaire?.pigmentation ||
+      "",
+    pores:
+      questionnaire?.pores || "",
+    sensitiveSkin:
+      questionnaire?.sensitiveSkin ||
+      "",
+    oiliness:
+      questionnaire?.oiliness || "",
+    sunExposure:
+      questionnaire?.sunExposure || "",
+    makeupUsage:
+      questionnaire?.makeupUsage || "",
+    faceWash:
+      questionnaire?.faceWash || "",
+    sleep:
+      questionnaire?.sleep || "",
+    water:
+      questionnaire?.water || "",
+    stress:
+      questionnaire?.stress || "",
+    exercise:
+      questionnaire?.exercise || "",
+    sunscreen:
+      questionnaire?.sunscreen || "",
+    routine:
+      questionnaire?.routine || "",
+    budget:
+      questionnaire?.budget || "",
+    city:
+      questionnaire?.city || "",
+    country:
+      questionnaire?.country || "",
+    climate:
+      questionnaire?.climate || "",
+    outdoorTime:
+      questionnaire?.outdoorTime || "",
+    environment:
+      questionnaire?.environment ||
+      null,
+  };
 }
 
 function decodeHtmlEntities(value) {
@@ -723,16 +1079,22 @@ function decodeHtmlEntities(value) {
     .replace(/&gt;/gi, ">");
 }
 
-function extractMetaContent(html, attributeName, attributeValue) {
-  const escapedName = attributeName.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+function extractMetaContent(
+  html,
+  attributeName,
+  attributeValue
+) {
+  const escapedName =
+    attributeName.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
 
-  const escapedValue = attributeValue.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+  const escapedValue =
+    attributeValue.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
 
   const patterns = [
     new RegExp(
@@ -749,52 +1111,91 @@ function extractMetaContent(html, attributeName, attributeValue) {
     const match = html.match(pattern);
 
     if (match?.[1]) {
-      return decodeHtmlEntities(match[1].trim());
+      return decodeHtmlEntities(
+        match[1].trim()
+      );
     }
   }
 
   return "";
 }
 
-async function fetchProductPageImage(productPageUrl) {
-  const safePageUrl = safePublicProductUrl(productPageUrl);
+async function fetchProductPageImage(
+  productPageUrl
+) {
+  const safePageUrl =
+    safePublicProductUrl(
+      productPageUrl
+    );
 
   if (!safePageUrl) {
     return "";
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const controller =
+    new AbortController();
+
+  const timeout = setTimeout(
+    () => controller.abort(),
+    8000
+  );
 
   try {
-    const response = await fetch(safePageUrl, {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-      },
-    });
+    const response = await fetch(
+      safePageUrl,
+      {
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml",
+        },
+      }
+    );
 
     if (!response.ok) {
       return "";
     }
 
     const contentType =
-      response.headers.get("content-type") || "";
+      response.headers.get(
+        "content-type"
+      ) || "";
 
-    if (!contentType.toLowerCase().includes("text/html")) {
+    if (
+      !contentType
+        .toLowerCase()
+        .includes("text/html")
+    ) {
       return "";
     }
 
-    const html = await response.text();
+    const html =
+      await response.text();
 
     const rawImageUrl =
-      extractMetaContent(html, "property", "og:image:secure_url") ||
-      extractMetaContent(html, "property", "og:image") ||
-      extractMetaContent(html, "name", "twitter:image") ||
-      extractMetaContent(html, "name", "twitter:image:src");
+      extractMetaContent(
+        html,
+        "property",
+        "og:image:secure_url"
+      ) ||
+      extractMetaContent(
+        html,
+        "property",
+        "og:image"
+      ) ||
+      extractMetaContent(
+        html,
+        "name",
+        "twitter:image"
+      ) ||
+      extractMetaContent(
+        html,
+        "name",
+        "twitter:image:src"
+      );
 
     if (!rawImageUrl) {
       return "";
@@ -802,7 +1203,11 @@ async function fetchProductPageImage(productPageUrl) {
 
     try {
       return safeHttpUrl(
-        new URL(rawImageUrl, response.url || safePageUrl).toString()
+        new URL(
+          rawImageUrl,
+          response.url ||
+            safePageUrl
+        ).toString()
       );
     } catch {
       return "";
@@ -819,130 +1224,48 @@ async function fetchProductPageImage(productPageUrl) {
   }
 }
 
-async function findExactProductPages(products) {
-  if (!Array.isArray(products) || products.length === 0) {
+async function addMissingProductImages(
+  products
+) {
+  if (
+    !Array.isArray(products) ||
+    products.length === 0
+  ) {
     return [];
   }
 
-  const lookupItems = products.map((product) => ({
-    id: product.id,
-    brand: product.brand,
-    name: product.name,
-    size: product.size || "",
-  }));
-
-  const prompt = `
-Search for the exact public product page for every skincare product below.
-
-Products:
-${JSON.stringify(lookupItems, null, 2)}
-
-Rules:
-- Return one record for every supplied id.
-- Prefer the official brand website.
-- Otherwise use a trusted Indian retailer such as Nykaa, Tira, Purplle, Amazon India only when the exact product and seller are clear.
-- The productPageUrl must be a direct page for the exact named product, not a homepage or search-results page.
-- Match the brand, full product name and size whenever possible.
-- Do not invent URLs.
-- Return an empty productPageUrl and seller when no exact page can be verified.
-`;
-
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: prompt,
-    config: {
-      tools: [
-        { googleSearch: {} },
-        { urlContext: {} },
-      ],
-      responseFormat: {
-        text: {
-          mimeType: "application/json",
-          schema: productPageLookupSchema,
-        },
-      },
-    },
-  });
-
-  const result = parseGeminiJson(
-    response,
-    "Product page lookup"
-  );
-
-  return Array.isArray(result.products)
-    ? result.products
-    : [];
-}
-
-async function enrichProductsWithImages(products) {
-  if (!Array.isArray(products) || products.length === 0) {
-    return products;
-  }
-
-  const needsLookup = products.filter(
-    (product) =>
-      !safePublicProductUrl(product.buyUrl) ||
-      !safeHttpUrl(product.imageUrl) ||
-      product.imageUrl === FALLBACK_PRODUCT_IMAGE
-  );
-
-  let lookupResults = [];
-
-  if (needsLookup.length > 0) {
-    try {
-      lookupResults = await findExactProductPages(needsLookup);
-    } catch (error) {
-      console.error(
-        "Product page lookup error:",
-        getErrorMessage(error)
-      );
-    }
-  }
-
-  const lookupById = new Map(
-    lookupResults.map((item) => [String(item.id || ""), item])
-  );
-
   return Promise.all(
     products.map(async (product) => {
-      const lookup = lookupById.get(product.id) || {};
+      if (
+        product.imageUrl &&
+        product.imageUrl !==
+          FALLBACK_PRODUCT_IMAGE
+      ) {
+        return product;
+      }
 
-      const productPageUrl =
-        safePublicProductUrl(product.buyUrl) ||
-        safePublicProductUrl(lookup.productPageUrl);
+      if (!product.buyUrl) {
+        return product;
+      }
 
-      const currentImageUrl =
-        product.imageUrl !== FALLBACK_PRODUCT_IMAGE
-          ? safeHttpUrl(product.imageUrl)
-          : "";
-
-      const fetchedImageUrl = currentImageUrl
-        ? ""
-        : await fetchProductPageImage(productPageUrl);
-
-      const verifiedSeller =
-        typeof lookup.seller === "string"
-          ? lookup.seller.trim()
-          : "";
+      const imageUrl =
+        await fetchProductPageImage(
+          product.buyUrl
+        );
 
       return {
         ...product,
-        buyUrl: productPageUrl || product.buyUrl,
-        seller:
-          product.seller &&
-          product.seller !== "Check official retailer"
-            ? product.seller
-            : verifiedSeller || product.seller,
         imageUrl:
-          currentImageUrl ||
-          fetchedImageUrl ||
+          imageUrl ||
           FALLBACK_PRODUCT_IMAGE,
       };
     })
   );
 }
 
-function extractSearchSources(response) {
+function extractSearchSources(
+  response
+) {
   const sources = [];
 
   const groundingChunks =
@@ -956,7 +1279,6 @@ function extractSearchSources(response) {
         title:
           chunk.web.title ||
           "Web source",
-
         url: chunk.web.uri,
       });
     }
@@ -966,9 +1288,7 @@ function extractSearchSources(response) {
         title:
           chunk.image.title ||
           "Product image source",
-
         url: chunk.image.sourceUri,
-
         imageUrl:
           chunk.image.imageUri || "",
       });
@@ -985,11 +1305,10 @@ function extractSearchSources(response) {
       sources.push({
         title:
           "Verified product page",
-
         url: item.retrievedUrl,
-
         status:
-          item.urlRetrievalStatus || "",
+          item.urlRetrievalStatus ||
+          "",
       });
     }
   }
@@ -1009,156 +1328,504 @@ function extractSearchSources(response) {
 
   return uniqueSources.slice(0, 15);
 }
-async function enrichProductsWithSearch(products) {
-  if (!Array.isArray(products) || products.length === 0) {
-    return {
-      products: [],
-      sources: [],
-    };
+
+
+function normalizeMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildSkinProfileText(
+  skinAnalysis,
+  questionnaire
+) {
+  const values = [
+    skinAnalysis?.skinType,
+    skinAnalysis?.acne,
+    skinAnalysis?.pigmentation,
+    skinAnalysis?.pores,
+    skinAnalysis?.hydration,
+    skinAnalysis?.oiliness,
+    skinAnalysis?.sensitivity,
+    ...(Array.isArray(
+      skinAnalysis?.mainConcerns
+    )
+      ? skinAnalysis.mainConcerns
+      : []),
+
+    questionnaire?.skinFeeling,
+    questionnaire?.acne,
+    questionnaire?.pigmentation,
+    questionnaire?.pores,
+    questionnaire?.sensitiveSkin,
+    questionnaire?.oiliness,
+    questionnaire?.sunExposure,
+    questionnaire?.climate,
+    questionnaire?.outdoorTime,
+  ];
+
+  return normalizeMatchText(
+    values.filter(Boolean).join(" ")
+  );
+}
+
+function getEnvironmentNumber(
+  questionnaire,
+  field
+) {
+  const value =
+    questionnaire?.environment?.[field];
+
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : 0;
+}
+
+function scoreCatalogProduct(
+  product,
+  skinAnalysis,
+  questionnaire
+) {
+  const profileText =
+    buildSkinProfileText(
+      skinAnalysis,
+      questionnaire
+    );
+
+  const skinType =
+    normalizeMatchText(
+      skinAnalysis?.skinType
+    );
+
+  const catalogSkinTypes =
+    normalizeStringArray(
+      product.skinTypes
+    ).map(normalizeMatchText);
+
+  const catalogConcerns =
+    normalizeStringArray(
+      product.concerns
+    );
+
+  let score = 0;
+
+  if (
+    skinType &&
+    catalogSkinTypes.some(
+      (item) =>
+        item === skinType ||
+        skinType.includes(item) ||
+        item.includes(skinType)
+    )
+  ) {
+    score += 12;
   }
 
-  const productsToFind = products.map((product) => ({
-    id: product.id,
-    brand: product.brand,
-    name: product.name,
-  }));
+  if (
+    profileText.includes("sensitive") &&
+    catalogSkinTypes.includes(
+      "sensitive"
+    )
+  ) {
+    score += 5;
+  }
 
-  const enrichmentPrompt = `
-Search for the exact skincare products listed below.
-
-Products:
-
-${JSON.stringify(productsToFind, null, 2)}
-
-For every product:
-
-- Keep the same id, brand and product name.
-- Search for the exact product sold in India.
-- Prefer the official brand website.
-- If the official website is unavailable, use a trusted Indian retailer.
-- The buyUrl must be a direct product-detail page.
-- Do not return a homepage, category page or search-results page.
-- The imageUrl must be a direct publicly accessible image of the exact product.
-- Prefer the product page's main image, og:image or twitter:image.
-- Do not use a logo, banner, unrelated image or generic category image.
-- Do not invent URLs.
-- Return an empty string if the product page or image cannot be verified.
-- Return one result for every supplied product.
-`;
-
-  const response = await ai.models.generateContent({
-    model: MODEL,
-
-    contents: enrichmentPrompt,
-
-    config: {
-      tools: [
-        {
-          googleSearch: {},
-        },
-        {
-          urlContext: {},
-        },
-      ],
-
-      responseFormat: {
-        text: {
-          mimeType: "application/json",
-          schema: productEnrichmentSchema,
-        },
-      },
-    },
-  });
-
-  const enrichmentResult = parseGeminiJson(
-    response,
-    "Product image and link enrichment"
-  );
-
-  const enrichedProducts = Array.isArray(
-    enrichmentResult.products
-  )
-    ? enrichmentResult.products
-    : [];
-
-  const enrichedById = new Map(
-    enrichedProducts.map((product) => [
-      String(product.id || "").trim(),
-      product,
-    ])
-  );
-
-  const mergedProducts = products.map((product) => {
-    let enrichedProduct = enrichedById.get(product.id);
-
-    /*
-      If Gemini changes or omits the id, try matching
-      using brand and product name.
-    */
-    if (!enrichedProduct) {
-      enrichedProduct = enrichedProducts.find((candidate) => {
-        const candidateBrand = String(
-          candidate.brand || ""
-        )
-          .trim()
-          .toLowerCase();
-
-        const candidateName = String(
-          candidate.name || ""
-        )
-          .trim()
-          .toLowerCase();
+  const matchedConcerns =
+    catalogConcerns.filter(
+      (concern) => {
+        const normalizedConcern =
+          normalizeMatchText(concern);
 
         return (
-          candidateBrand ===
-            product.brand.trim().toLowerCase() &&
-          candidateName ===
-            product.name.trim().toLowerCase()
+          normalizedConcern &&
+          profileText.includes(
+            normalizedConcern
+          )
         );
-      });
-    }
-
-    if (!enrichedProduct) {
-      return product;
-    }
-
-    const verifiedBuyUrl = safeHttpUrl(
-      enrichedProduct.buyUrl
+      }
     );
 
-    const verifiedImageUrl = safeHttpUrl(
-      enrichedProduct.imageUrl
+  score +=
+    matchedConcerns.length * 4;
+
+  const category =
+    normalizeMatchText(
+      product.category
     );
 
-    const verifiedSeller =
-      typeof enrichedProduct.seller === "string"
-        ? enrichedProduct.seller.trim()
-        : "";
+  if (
+    [
+      "cleanser",
+      "moisturizer",
+      "sunscreen",
+    ].includes(category)
+  ) {
+    score += 2;
+  }
 
-    return {
+  const uvIndex =
+    getEnvironmentNumber(
+      questionnaire,
+      "uvIndex"
+    );
+
+  const humidity =
+    getEnvironmentNumber(
+      questionnaire,
+      "humidityPercent"
+    );
+
+  const aqi =
+    getEnvironmentNumber(
+      questionnaire,
+      "aqi"
+    );
+
+  if (
+    category === "sunscreen" &&
+    (
+      uvIndex >= 3 ||
+      profileText.includes(
+        "sun exposure"
+      ) ||
+      profileText.includes(
+        "mostly outdoors"
+      )
+    )
+  ) {
+    score += 6;
+  }
+
+  if (
+    category === "moisturizer" &&
+    (
+      humidity > 0 &&
+      humidity <= 45 ||
+      profileText.includes(
+        "dry"
+      ) ||
+      profileText.includes(
+        "dehydration"
+      )
+    )
+  ) {
+    score += 5;
+  }
+
+  if (
+    category === "cleanser" &&
+    (
+      aqi >= 100 ||
+      profileText.includes(
+        "oiliness"
+      ) ||
+      profileText.includes(
+        "acne"
+      )
+    )
+  ) {
+    score += 4;
+  }
+
+  return {
+    score,
+    matchedConcerns,
+  };
+}
+
+function buildCatalogReason(
+  product,
+  matchedConcerns,
+  skinAnalysis
+) {
+  const skinType =
+    typeof skinAnalysis?.skinType ===
+      "string" &&
+    skinAnalysis.skinType.trim()
+      ? skinAnalysis.skinType.trim()
+      : "your reported";
+
+  const concernText =
+    matchedConcerns.length > 0
+      ? ` It also matches: ${matchedConcerns
+          .slice(0, 3)
+          .join(", ")}.`
+      : "";
+
+  return `${product.name} was selected from the verified local catalogue because its ${product.category.toLowerCase()} profile is suitable for ${skinType} skin.${concernText}`;
+}
+
+function normalizeCatalogProduct(
+  product,
+  index,
+  matchedConcerns,
+  skinAnalysis
+) {
+  return normalizeProducts([
+    {
       ...product,
 
+      id:
+        product.id ||
+        createProductId(
+          product,
+          index
+        ),
+
       seller:
-        verifiedSeller ||
         product.seller ||
-        "Check official retailer",
+        `${product.brand} Official Website`,
 
       buyUrl:
-        verifiedBuyUrl ||
         product.buyUrl ||
+        product.buyLink ||
         "",
 
       imageUrl:
-        verifiedImageUrl ||
         product.imageUrl ||
-        FALLBACK_PRODUCT_IMAGE,
-    };
-  });
+        product.image ||
+        "",
 
-  return {
-    products: mergedProducts,
-    sources: extractSearchSources(response),
-  };
+      reason:
+        product.reason ||
+        buildCatalogReason(
+          product,
+          matchedConcerns,
+          skinAnalysis
+        ),
+
+      matchedConcerns,
+
+      keyIngredients:
+        product.keyIngredients ||
+        [],
+
+      usage:
+        product.usage ||
+        (
+          normalizeMatchText(
+            product.category
+          ) === "sunscreen"
+            ? "Apply as the final morning skincare step. Reapply when outdoors."
+            : normalizeMatchText(
+                  product.category
+                ) === "cleanser"
+              ? "Massage gently onto damp skin and rinse. Use once or twice daily according to tolerance."
+              : "Apply to clean skin after cleansing. Use according to your routine and skin tolerance."
+        ),
+
+      warnings:
+        product.warnings ||
+        [
+          "Patch-test before regular use.",
+          "Stop use if persistent irritation occurs.",
+        ],
+
+      priceCheckedAt:
+        product.priceCheckedAt ||
+        "",
+    },
+  ])[0];
+}
+
+function chooseCatalogProducts(
+  skinAnalysis,
+  questionnaire,
+  budget
+) {
+  if (
+    !Array.isArray(productCatalog) ||
+    productCatalog.length === 0
+  ) {
+    return [];
+  }
+
+  const scoredProducts =
+    productCatalog
+      .map(
+        (product, index) => {
+          const scoring =
+            scoreCatalogProduct(
+              product,
+              skinAnalysis,
+              questionnaire
+            );
+
+          return {
+            product,
+            index,
+            ...scoring,
+          };
+        }
+      )
+      .sort((first, second) => {
+        if (
+          second.score !== first.score
+        ) {
+          return (
+            second.score -
+            first.score
+          );
+        }
+
+        const firstPrice =
+          Number(
+            first.product.price
+          ) || 0;
+
+        const secondPrice =
+          Number(
+            second.product.price
+          ) || 0;
+
+        if (
+          firstPrice === 0 &&
+          secondPrice > 0
+        ) {
+          return 1;
+        }
+
+        if (
+          secondPrice === 0 &&
+          firstPrice > 0
+        ) {
+          return -1;
+        }
+
+        return firstPrice -
+          secondPrice;
+      });
+
+  const selected = [];
+  const selectedIds =
+    new Set();
+
+  let runningTotal = 0;
+
+  const essentialCategories = [
+    "cleanser",
+    "moisturizer",
+    "sunscreen",
+  ];
+
+  for (
+    const category
+    of essentialCategories
+  ) {
+    const candidates =
+      scoredProducts.filter(
+        (entry) =>
+          normalizeMatchText(
+            entry.product.category
+          ) === category &&
+          !selectedIds.has(
+            entry.product.id
+          )
+      );
+
+    if (
+      candidates.length === 0
+    ) {
+      continue;
+    }
+
+    let chosen =
+      candidates[0];
+
+    if (budget > 0) {
+      const fittingCandidate =
+        candidates.find(
+          (entry) => {
+            const price =
+              Number(
+                entry.product.price
+              ) || 0;
+
+            return (
+              price === 0 ||
+              runningTotal +
+                price <=
+                budget
+            );
+          }
+        );
+
+      if (fittingCandidate) {
+        chosen =
+          fittingCandidate;
+      }
+    }
+
+    selected.push(chosen);
+    selectedIds.add(
+      chosen.product.id
+    );
+
+    runningTotal +=
+      Number(
+        chosen.product.price
+      ) || 0;
+  }
+
+  for (
+    const entry
+    of scoredProducts
+  ) {
+    if (
+      selected.length >= 4
+    ) {
+      break;
+    }
+
+    if (
+      selectedIds.has(
+        entry.product.id
+      )
+    ) {
+      continue;
+    }
+
+    const price =
+      Number(
+        entry.product.price
+      ) || 0;
+
+    if (
+      budget > 0 &&
+      price > 0 &&
+      runningTotal + price >
+        budget
+    ) {
+      continue;
+    }
+
+    selected.push(entry);
+    selectedIds.add(
+      entry.product.id
+    );
+    runningTotal += price;
+  }
+
+  return selected
+    .slice(0, 4)
+    .map(
+      (
+        entry,
+        selectedIndex
+      ) =>
+        normalizeCatalogProduct(
+          entry.product,
+          selectedIndex,
+          entry.matchedConcerns,
+          skinAnalysis
+        )
+    )
+    .filter(Boolean);
 }
 
 function getErrorMessage(error) {
@@ -1202,9 +1869,7 @@ function getErrorStatus(error) {
   }
 
   if ("code" in error) {
-    const code = Number(
-      error.code
-    );
+    const code = Number(error.code);
 
     if (Number.isFinite(code)) {
       return code;
@@ -1241,548 +1906,216 @@ function isQuotaError(error) {
 /*                                  Controller                                */
 /* -------------------------------------------------------------------------- */
 
-const analyzeSkin = async (
-  req,
-  res
-) => {
+const analyzeSkin = async (req, res) => {
   try {
-    const {
-      questionnaire,
-      image,
-    } = req.body;
+    const { questionnaire, image } = req.body;
 
-    if (!questionnaire) {
+    if (!questionnaire || typeof questionnaire !== "object") {
       return res.status(400).json({
         success: false,
-        message:
-          "Questionnaire data is required.",
+        message: "Questionnaire data is required.",
       });
     }
 
-    if (!image) {
+    if (typeof image !== "string" || !image.trim()) {
       return res.status(400).json({
         success: false,
-        message:
-          "Image is required.",
+        message: "Image is required.",
       });
     }
 
-    const safeImageName =
-      path.basename(image);
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({
+        success: false,
+        message: "GEMINI_API_KEY is missing from the backend environment.",
+      });
+    }
 
-    const imagePath = path.join(
-      __dirname,
-      "../uploads",
-      safeImageName
-    );
+    const safeImageName = path.basename(image);
+    const imagePath = path.join(__dirname, "../uploads", safeImageName);
 
-    if (
-      !fs.existsSync(imagePath)
-    ) {
+    if (!fs.existsSync(imagePath)) {
       return res.status(404).json({
         success: false,
-        message:
-          "Uploaded image was not found.",
+        message: "Uploaded image was not found.",
       });
     }
 
-    const imageBytes =
-      fs.readFileSync(imagePath);
-
-    const imageBase64 =
-      imageBytes.toString("base64");
-
-    const mimeType =
-      mime.lookup(imagePath) ||
-      "image/jpeg";
-
     /* ---------------------------------------------------------------------- */
-    /*                    Stage 1: Analyze the uploaded image                  */
+    /* Step 1: Gemini image analysis                                           */
     /* ---------------------------------------------------------------------- */
 
-    const skinAnalysisPrompt = `
-You are a skincare analysis assistant.
-
-Analyze the uploaded facial image together with the user's questionnaire.
-
-Questionnaire:
-
-${JSON.stringify(
-  questionnaire,
-  null,
-  2
-)}
-
-Important rules:
-
-- Provide cosmetic skincare guidance only.
-- Do not diagnose medical conditions or skin diseases.
-- Do not claim certainty from a photograph.
-- Use careful wording such as "appears", "may indicate", "possibly" or "likely".
-- Consider the questionnaire when evaluating hydration, oiliness, sensitivity, lifestyle and current routine.
-- Generate a practical morning routine and night routine.
-- Keep the skin score between 0 and 100.
-- The skin score is a general cosmetic wellness score, not a medical score.
-- Do not recommend particular product brands during this stage.
-- Recommend potentially helpful ingredient types.
-- Include ingredients or skincare practices the user may need to avoid.
-- Keep all recommendations suitable for the user's stated sensitivity.
-`;
-
-    const analysisResponse =
-      await ai.models.generateContent({
-        model: MODEL,
-
-        contents: [
-          {
-            role: "user",
-
-            parts: [
-              {
-                inlineData: {
-                  mimeType,
-                  data: imageBase64,
-                },
-              },
-
-              {
-                text:
-                  skinAnalysisPrompt,
-              },
-            ],
-          },
-        ],
-
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: skinAnalysisSchema,
-        },
-      });
-
-    const skinAnalysis =
-      parseGeminiJson(
-        analysisResponse,
-        "Skin analysis"
-      );
+    const skinAnalysis = await analyzeSkinImage({
+      imagePath,
+      questionnaire,
+    });
 
     /* ---------------------------------------------------------------------- */
-    /*                       Stage 2: Search live products                     */
+    /* Step 2: Build category-based routine                                    */
     /* ---------------------------------------------------------------------- */
 
-    const questionnaireBudget =
-      extractBudget(
-        questionnaire
-      );
+    const baseRoutine = buildRoutine(skinAnalysis, questionnaire);
 
-    const productSearchPrompt = `
-Find current skincare products sold in India that fit this user's skin analysis, skincare needs and total budget.
+    /* ---------------------------------------------------------------------- */
+    /* Step 3: Attach verified local-catalogue products                        */
+    /* ---------------------------------------------------------------------- */
 
-Skin analysis:
+    const selectedResult = selectProductsForRoutine(
+      baseRoutine,
+      skinAnalysis,
+      questionnaire
+    );
 
-${JSON.stringify(
-  skinAnalysis,
-  null,
-  2
-)}
+    /* ---------------------------------------------------------------------- */
+    /* Step 4: Apply ingredient and user-safety rules                          */
+    /* ---------------------------------------------------------------------- */
 
-Questionnaire:
+    const safetyResult = validateRoutineSafety(
+      selectedResult.routine,
+      skinAnalysis,
+      questionnaire
+    );
 
-${JSON.stringify(
-  questionnaire,
-  null,
-  2
-)}
+    /* ---------------------------------------------------------------------- */
+    /* Step 5: Fit the complete routine to the user's total budget             */
+    /* ---------------------------------------------------------------------- */
 
-Detected numeric budget:
+    const budgetResult = optimizeRoutineForBudget(
+      safetyResult.routine,
+      skinAnalysis,
+      questionnaire
+    );
 
-${
-  questionnaireBudget > 0
-    ? `₹${questionnaireBudget}`
-    : "No clear numeric budget was provided."
-}
+    /* ---------------------------------------------------------------------- */
+    /* Step 6: Apply weather and air-quality guidance                          */
+    /* ---------------------------------------------------------------------- */
 
-Search and recommendation rules:
-
-- Search current public product pages.
-- Do not hardcode or favor any brand.
-- Compare suitable options from different brands.
-- Recommend between 2 and 4 products.
-- Recommend only products that can be identified from public pages.
-- Prefer official brand websites and established Indian beauty or skincare retailers.
-- Use marketplace listings only when the exact product and seller appear trustworthy.
-- The buyUrl must point directly to the product page.
-- Do not use a homepage or search-results URL as the buyUrl.
-- Do not invent product names, prices, sizes, ingredients, sellers or URLs.
-- If the current price cannot be confirmed, return 0 for price.
-- Return all prices in INR.
-- Treat the budget as the total budget for the complete routine.
-- Do not treat the budget as the maximum price for every individual product.
-- Keep the combined total within the user's budget whenever a budget is provided.
-- For limited budgets, prioritize cleanser, moisturizer and sunscreen.
-- Add a serum or treatment only when the budget allows.
-- Do not recommend duplicate products.
-- Avoid unnecessarily repeating the same active ingredient.
-- Do not recommend prescription medicines.
-- Explain why every product matches the user's skin type, concerns, sensitivity, lifestyle and budget.
-- Include a reliable product image URL only when it matches the exact product.
-- Return an empty imageUrl when a reliable image cannot be verified.
-- Include usage guidance.
-- Include patch-test and irritation warnings where relevant.
-- Mention that prices and availability can change.
-`;
-
-    let productResult = {
-      detectedBudget:
-        questionnaireBudget,
-
-      budgetStatus:
-        "Live product search unavailable",
-
-      products: [],
-
-      priceDisclaimer:
-        "Live product prices and availability could not be checked.",
+    const environment = questionnaire.environment || {};
+    const weatherInput = {
+      ...environment,
+      location:
+        environment.location ||
+        questionnaire.city ||
+        questionnaire.country ||
+        "",
+      source: environment.source || "Questionnaire weather data",
     };
 
-    let productSources = [];
+    const weatherResult = applyWeatherGuidance(
+      budgetResult.routine,
+      weatherInput,
+      questionnaire
+    );
 
-    let productSearchUnavailable =
-      false;
+    const finalRoutine = weatherResult.routine;
 
-    let productSearchMessage = "";
+    /* ---------------------------------------------------------------------- */
+    /* Preserve the product cards expected by the current frontend            */
+    /* ---------------------------------------------------------------------- */
 
-    try {
-      const productResponse =
-        await ai.models.generateContent({
-          model: MODEL,
+    const uniqueProducts = [];
+    const seenProductIds = new Set();
 
-          contents:
-            productSearchPrompt,
+    for (const sectionName of ["morning", "night", "weekly"]) {
+      for (const step of finalRoutine?.[sectionName] || []) {
+        const product = step?.product;
+        if (!product) continue;
 
-          config: {
-            tools: [
-              {
-                googleSearch: {},
-              },
-            ],
+        const productId =
+          product.id || createProductId(product, uniqueProducts.length);
 
-            responseFormat: {
-              text: {
-                mimeType: "application/json",
-                schema: productRecommendationSchema,
-              },
-            },
-          },
+        if (seenProductIds.has(productId)) continue;
+
+        seenProductIds.add(productId);
+        uniqueProducts.push({
+          ...product,
+          id: productId,
+          category: product.category || step.category || "",
+          usage: product.usage || step.instruction || "",
+          reason:
+            product.reason ||
+            `Selected for the ${step.category || "skincare"} step according to the analysis.`,
         });
-
-      productResult =
-        parseGeminiJson(
-          productResponse,
-          "Product search"
-        );
-
-      productSources =
-        extractSearchSources(
-          productResponse
-        );
-
-      console.log(
-        "Gemini product search returned:",
-        Array.isArray(productResult.products)
-          ? `${productResult.products.length} product(s)`
-          : "no products array"
-      );
-    } catch (productError) {
-      console.error(
-        "Live product search error:",
-        getErrorMessage(productError)
-      );
-
-      productSearchUnavailable =
-        true;
-
-      if (
-        isQuotaError(
-          productError
-        )
-      ) {
-        productSearchMessage =
-          "Live product verification is temporarily unavailable because the Gemini API quota was exhausted. AI-generated product suggestions are shown below; verify prices and availability before purchase.";
-      } else {
-        productSearchMessage =
-          "Live product verification is temporarily unavailable. AI-generated product suggestions are shown below; verify prices and availability before purchase.";
       }
     }
 
-    let products =
-      normalizeProducts(
-        productResult.products
-      );
+    let products = normalizeProducts(uniqueProducts);
+    products = await attachAutomaticProductImages(products);
 
-    /*
-      If the grounded search fails or returns no usable products,
-      ask Gemini for dynamic, non-hardcoded suggestions without
-      live-search claims. This keeps the product section useful
-      while clearly marking prices and links as unverified.
-    */
-    if (products.length === 0) {
-      try {
-        const fallbackPrompt = `
-Create a personalized skincare product routine for this user.
+    const productSources = products
+      .filter((product) => Boolean(product.buyUrl))
+      .map((product) => ({
+        title: `${product.brand} ${product.name}`.trim(),
+        url: product.buyUrl,
+      }));
 
-Skin analysis:
-${JSON.stringify(
-  skinAnalysis,
-  null,
-  2
-)}
+    const routineStepToText = (step) => {
+      if (typeof step === "string") return step;
 
-Questionnaire:
-${JSON.stringify(
-  questionnaire,
-  null,
-  2
-)}
+      const productName = step?.product?.name
+        ? ` — ${step.product.name}`
+        : "";
+      const instruction = step?.instruction
+        ? `: ${step.instruction}`
+        : "";
 
-Total budget:
-${
-  questionnaireBudget > 0
-    ? `₹${questionnaireBudget}`
-    : "Not clearly provided"
-}
+      return `${step?.category || step?.name || "Skincare step"}${productName}${instruction}`;
+    };
 
-Rules:
-- Recommend 2 to 4 real, commonly available skincare products in India.
-- Choose products dynamically from different suitable brands.
-- Keep the complete routine within the total budget when one is provided.
-- Prioritize cleanser, moisturizer and sunscreen for a limited budget.
-- Do not recommend prescription medicines.
-- Use cautious cosmetic guidance only.
-- Prices may be approximate; use a realistic INR estimate.
-- Leave buyUrl, alternativeBuyUrl and imageUrl empty when they are not verified. A separate grounded lookup will try to add the exact product page and product image.
-- Set seller to "Check official retailer".
-- Explain why each product suits the user's visible skin needs and questionnaire answers.
-- Include usage guidance and patch-test warnings.
-`;
+    const morningRoutine = (finalRoutine.morning || []).map(routineStepToText);
+    const nightRoutine = (finalRoutine.night || []).map(routineStepToText);
+    const weeklyRoutine = (finalRoutine.weekly || []).map(routineStepToText);
 
-        const fallbackResponse =
-          await ai.models.generateContent({
-            model: MODEL,
-            contents: fallbackPrompt,
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: productRecommendationSchema,
-            },
-          });
-
-        const fallbackResult =
-          parseGeminiJson(
-            fallbackResponse,
-            "AI product fallback"
-          );
-
-        products =
-          normalizeProducts(
-            fallbackResult.products
-          );
-
-        if (products.length > 0) {
-          productResult = {
-            ...fallbackResult,
-            detectedBudget:
-              questionnaireBudget ||
-              Number(
-                fallbackResult.detectedBudget
-              ) ||
-              0,
-            budgetStatus:
-              "AI suggestions — verify current prices",
-            priceDisclaimer:
-              "These products were selected dynamically by AI, but live prices, sellers and purchase links were not verified. Check an official retailer before buying.",
-          };
-
-          productSearchUnavailable =
-            true;
-
-          if (!productSearchMessage) {
-            productSearchMessage =
-              "Live product verification returned no usable products, so AI-generated suggestions are shown instead.";
-          }
-        }
-      } catch (fallbackError) {
-        console.error(
-          "AI product fallback error:",
-          getErrorMessage(
-            fallbackError
-          )
-        );
-
-        productSearchUnavailable =
-          true;
-
-        if (!productSearchMessage) {
-          productSearchMessage =
-            "Products could not be generated at this time. Please try again later.";
-        }
-      }
-    }
-
-
-
-    products = await enrichProductsWithImages(products);
-    /*
-  Stage 3: Enrich AI-selected products with
-  verified purchase pages and product images.
-*/
-const needsProductEnrichment = products.some(
-  (product) =>
-    !product.buyUrl ||
-    !product.imageUrl ||
-    product.imageUrl === FALLBACK_PRODUCT_IMAGE
-);
-
-if (
-  products.length > 0 &&
-  needsProductEnrichment
-) {
-  try {
-    console.log(
-      "Searching for product images and purchase links..."
+    const routineTotal = products.reduce(
+      (total, product) => total + (Number(product.price) || 0),
+      0
     );
 
-    const enrichment =
-      await enrichProductsWithSearch(products);
+    const detectedBudget = budgetResult.budget.detectedBudget;
+    const budgetStatus = budgetResult.budget.status;
+    const productSearchUnavailable = products.length === 0;
 
-    if (
-      Array.isArray(enrichment.products) &&
-      enrichment.products.length > 0
-    ) {
-      products = enrichment.products;
-    }
+    const productSearchMessage = productSearchUnavailable
+      ? "No suitable products remained after routine, safety and budget processing."
+      : "Products were selected from the verified local catalogue, checked by the safety and budget engines, and enriched with product-page images when available.";
 
-    /*
-      Merge and remove duplicate search sources.
-    */
-    const combinedSources = [
-      ...productSources,
-      ...(Array.isArray(enrichment.sources)
-        ? enrichment.sources
-        : []),
-    ];
-
-    const seenSourceUrls = new Set();
-
-    productSources = combinedSources
-      .filter((source) => {
-        const sourceUrl =
-          typeof source?.url === "string"
-            ? source.url.trim()
-            : "";
-
-        if (
-          !sourceUrl ||
-          seenSourceUrls.has(sourceUrl)
-        ) {
-          return false;
-        }
-
-        seenSourceUrls.add(sourceUrl);
-        return true;
-      })
-      .slice(0, 15);
-
-    const productsWithImages =
-      products.filter(
-        (product) =>
-          product.imageUrl &&
-          product.imageUrl !==
-            FALLBACK_PRODUCT_IMAGE
-      ).length;
-
-    const productsWithLinks =
-      products.filter(
-        (product) => Boolean(product.buyUrl)
-      ).length;
-
-    console.log(
-      `Product enrichment completed: ${productsWithImages}/${products.length} image(s), ${productsWithLinks}/${products.length} purchase link(s).`
-    );
-  } catch (enrichmentError) {
-    /*
-      Do not fail the entire analysis if product
-      image or link lookup fails.
-    */
-    console.error(
-      "Product enrichment error:",
-      getErrorMessage(enrichmentError)
-    );
-
-    productSearchUnavailable = true;
-
-    if (!productSearchMessage) {
-      productSearchMessage =
-        "Products were generated, but some product images or purchase links could not be verified.";
-    }
-  }
-}
-
-    const calculatedRoutineTotal =
-      products.reduce(
-        (total, product) =>
-          total + product.price,
-        0
-      );
-
-    const detectedBudget =
-      questionnaireBudget ||
-      Number(
-        productResult.detectedBudget
-      ) ||
-      0;
-
-    let budgetStatus =
-      productResult.budgetStatus ||
-      "Budget not provided";
-
-    if (
-      !productSearchUnavailable &&
-      detectedBudget > 0
-    ) {
-      budgetStatus =
-        calculatedRoutineTotal <=
-        detectedBudget
-          ? "Within budget"
-          : "Above budget";
-    }
+    const priceDisclaimer =
+      "Purchase links and catalogue prices may change on the seller's website. Patch-test new products before regular use.";
 
     const result = {
       ...skinAnalysis,
 
+      // Keep the existing frontend field names.
+      morningRoutine,
+      nightRoutine,
+      weeklyRoutine,
       products,
-
-      routineTotal:
-        calculatedRoutineTotal,
-
+      routineTotal,
       detectedBudget,
-
       budgetStatus,
-
-      priceDisclaimer:
-        productResult
-          .priceDisclaimer ||
-        "Prices and availability were checked during analysis and may change before purchase.",
-
+      priceDisclaimer,
       productSources,
-
       productSearchUnavailable,
-
       productSearchMessage,
+
+      // New structured output for future frontend sections.
+      routine: finalRoutine,
+      safety: safetyResult.safety,
+      budget: budgetResult.budget,
+      weather: weatherResult.weather,
+      missingProductSteps: selectedResult.missingSteps || [],
+      pipeline: {
+        analysis: "completed",
+        routineBuilder: "completed",
+        productSelector: "completed",
+        safetyEngine: "completed",
+        budgetEngine: "completed",
+        weatherEngine: "completed",
+      },
     };
 
     console.log(
-      productSearchUnavailable
-        ? "Skin analysis completed. Live product search was unavailable."
-        : "Skin analysis and live product search completed successfully."
+      `SkinSense pipeline completed: ${products.length} unique product(s), total ₹${routineTotal}.`
     );
 
     return res.status(200).json({
@@ -1790,30 +2123,26 @@ if (
       result,
     });
   } catch (error) {
-    console.error(
-      "Gemini analysis error:",
-      error
-    );
+    console.error("SkinSense analysis pipeline error:", error);
 
-    const errorMessage =
-      getErrorMessage(error);
+    const errorMessage = getErrorMessage(error);
 
-    if (isQuotaError(error)) {
+    if (isQuotaError(error) || Number(error?.status) === 429) {
       return res.status(429).json({
         success: false,
-
         message:
-          "The Gemini API quota is currently exhausted. Your skin analysis could not be completed. Please wait for the quota to reset or review the billing and rate limits for your Google AI project.",
+          "The Gemini API quota is currently exhausted. The skin analysis could not be completed. Please wait for the quota to reset or review the billing and rate limits for your Google AI project.",
       });
     }
 
-    return res.status(500).json({
-      success: false,
+    const status = Number(error?.status);
 
-      message:
-        errorMessage ||
-        "Gemini analysis failed.",
-    });
+    return res
+      .status(Number.isFinite(status) && status >= 400 ? status : 500)
+      .json({
+        success: false,
+        message: errorMessage || "SkinSense analysis failed.",
+      });
   }
 };
 
