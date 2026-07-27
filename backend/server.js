@@ -8,6 +8,8 @@ const connectDB = require("./config/db");
 const authRoutes = require("./routes/auth");
 const uploadRoutes = require("./routes/upload");
 const geminiRoutes = require("./routes/gemini");
+const environmentRoutes =
+  require("./routes/environment");
 
 const app = express();
 
@@ -60,6 +62,10 @@ app.use("/api/auth", authRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/uploads", express.static("uploads"));
 app.use("/api/gemini", geminiRoutes);
+app.use(
+  "/api/environment",
+  environmentRoutes
+);
 
 // Backend status route
 app.get("/", (req, res) => {

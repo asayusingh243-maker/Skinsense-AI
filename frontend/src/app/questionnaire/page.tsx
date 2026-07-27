@@ -10,6 +10,99 @@ import Lifestyle from "@/components/questionnaire/Lifestyle";
 import BudgetLocation from "@/components/questionnaire/BudgetLocation";
 import ReviewSubmit from "@/components/questionnaire/ReviewSubmit";
 
+interface EnvironmentData {
+  temperatureC: number;
+  apparentTemperatureC: number;
+  humidityPercent: number;
+  precipitationMm: number;
+
+  weatherCode: number | null;
+  weatherCondition: string;
+
+  uvIndex: number;
+
+  aqi: number;
+  pm25: number;
+  pm10: number;
+  ozone: number;
+
+  timezone: string;
+  capturedAt: string;
+  dataSource: string;
+}
+
+interface QuestionnaireData {
+  // Personal information
+  name: string;
+  age: string;
+  gender: string;
+
+  // Skin assessment
+  skinFeeling: string;
+  acne: string;
+  pigmentation: string;
+  pores: string;
+  sensitiveSkin: string;
+  oiliness: string;
+  sunExposure: string;
+  makeupUsage: string;
+  faceWash: string;
+
+  // Lifestyle
+  sleep: string;
+  water: string;
+  stress: string;
+  exercise: string;
+  sunscreen: string;
+  routine: string;
+
+  // Budget and location
+  budget: string;
+  city: string;
+  country: string;
+  climate: string;
+  outdoorTime: string;
+
+  // Current weather and air-quality summary
+  environment: EnvironmentData | null;
+}
+
+const initialFormData: QuestionnaireData = {
+  // Personal information
+  name: "",
+  age: "",
+  gender: "",
+
+  // Skin assessment
+  skinFeeling: "",
+  acne: "",
+  pigmentation: "",
+  pores: "",
+  sensitiveSkin: "",
+  oiliness: "",
+  sunExposure: "",
+  makeupUsage: "",
+  faceWash: "",
+
+  // Lifestyle
+  sleep: "",
+  water: "",
+  stress: "",
+  exercise: "",
+  sunscreen: "",
+  routine: "",
+
+  // Budget and location
+  budget: "",
+  city: "",
+  country: "",
+  climate: "",
+  outdoorTime: "",
+
+  // Environment
+  environment: null,
+};
+
 export default function QuestionnairePage() {
   const router = useRouter();
 
@@ -17,52 +110,37 @@ export default function QuestionnairePage() {
 
   const [step, setStep] = useState(1);
 
-  const [formData, setFormData] = useState({
-    // Personal
-    name: "",
-    age: "",
-    gender: "",
+  const [formData, setFormData] =
+    useState<QuestionnaireData>(initialFormData);
 
-    // Skin
-    skinFeeling: "",
-    acne: "",
-    pigmentation: "",
-    pores: "",
-    sensitiveSkin: "",
-    oiliness: "",
-    sunExposure: "",
-    makeupUsage: "",
-    faceWash: "",
-
-    // Lifestyle
-    sleep: "",
-    water: "",
-    stress: "",
-    exercise: "",
-    sunscreen: "",
-    routine: "",
-
-    // Budget & Location
-    budget: "",
-    city: "",
-    country: "",
-    climate: "",
-    outdoorTime: "",
-  });
+  const updateFormData = (
+    data: Partial<QuestionnaireData>
+  ) => {
+    setFormData((previousData) => ({
+      ...previousData,
+      ...data,
+    }));
+  };
 
   const nextStep = () => {
     if (step < totalSteps) {
-      setStep((prev) => prev + 1);
+      setStep((previousStep) => previousStep + 1);
     }
   };
 
   const prevStep = () => {
     if (step > 1) {
-      setStep((prev) => prev - 1);
+      setStep((previousStep) => previousStep - 1);
     }
   };
 
   const finishQuestionnaire = () => {
+    /*
+      This saves the questionnaire together with the
+      summarized environmental information.
+
+      Exact latitude and longitude are not stored.
+    */
     localStorage.setItem(
       "questionnaire",
       JSON.stringify(formData)
@@ -72,31 +150,29 @@ export default function QuestionnairePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 py-12 px-6">
-
-      <div className="max-w-4xl mx-auto">
-
+    <main className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 px-6 py-12">
+      <div className="mx-auto max-w-4xl">
         <ProgressBar
           currentStep={step}
           totalSteps={totalSteps}
         />
 
-        {/* STEP 1 */}
+        {/* Step 1: Personal information */}
 
         {step === 1 && (
           <PersonalInfo
             formData={formData}
-            handleChange={(e) =>
-              setFormData((prev) => ({
-                ...prev,
-                [e.target.name]: e.target.value,
-              }))
+            handleChange={(event) =>
+              updateFormData({
+                [event.target.name]:
+                  event.target.value,
+              })
             }
             nextStep={nextStep}
           />
         )}
 
-        {/* STEP 2 */}
+        {/* Step 2: Skin assessment */}
 
         {step === 2 && (
           <SkinAssessment
@@ -105,24 +181,22 @@ export default function QuestionnairePage() {
               acne: formData.acne,
               pigmentation: formData.pigmentation,
               pores: formData.pores,
-              sensitiveSkin: formData.sensitiveSkin,
+              sensitiveSkin:
+                formData.sensitiveSkin,
               oiliness: formData.oiliness,
               sunExposure: formData.sunExposure,
               makeupUsage: formData.makeupUsage,
               faceWash: formData.faceWash,
             }}
             setFormData={(skinData) =>
-              setFormData((prev) => ({
-                ...prev,
-                ...skinData,
-              }))
+              updateFormData(skinData)
             }
             nextStep={nextStep}
             prevStep={prevStep}
           />
         )}
 
-        {/* STEP 3 */}
+        {/* Step 3: Lifestyle */}
 
         {step === 3 && (
           <Lifestyle
@@ -135,17 +209,14 @@ export default function QuestionnairePage() {
               routine: formData.routine,
             }}
             setFormData={(lifestyleData) =>
-              setFormData((prev) => ({
-                ...prev,
-                ...lifestyleData,
-              }))
+              updateFormData(lifestyleData)
             }
             nextStep={nextStep}
             prevStep={prevStep}
           />
         )}
 
-        {/* STEP 4 */}
+        {/* Step 4: Budget, location and weather */}
 
         {step === 4 && (
           <BudgetLocation
@@ -155,30 +226,30 @@ export default function QuestionnairePage() {
               country: formData.country,
               climate: formData.climate,
               outdoorTime: formData.outdoorTime,
+              environment: formData.environment,
             }}
-            setFormData={(budgetData) =>
-              setFormData((prev) => ({
-                ...prev,
-                ...budgetData,
-              }))
+            setFormData={(budgetLocationData) =>
+              updateFormData(
+                budgetLocationData
+              )
             }
             nextStep={nextStep}
             prevStep={prevStep}
           />
         )}
 
-        {/* STEP 5 */}
+        {/* Step 5: Review and submit */}
 
         {step === 5 && (
           <ReviewSubmit
             formData={formData}
             prevStep={prevStep}
-            finishQuestionnaire={finishQuestionnaire}
+            finishQuestionnaire={
+              finishQuestionnaire
+            }
           />
         )}
-
       </div>
-
-    </div>
+    </main>
   );
 }
