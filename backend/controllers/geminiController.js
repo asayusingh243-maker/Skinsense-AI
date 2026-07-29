@@ -10,6 +10,9 @@ const { selectProductsForRoutine } = require("../services/productSelector");
 const { validateRoutineSafety } = require("../services/safetyEngine");
 const { optimizeRoutineForBudget } = require("../services/budgetEngine");
 const { applyWeatherGuidance } = require("../services/weatherEngine");
+const {
+  reconcileAssessment,
+} = require("../services/assessmentReconciliationService");
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -1941,23 +1944,41 @@ const analyzeSkin = async (req, res) => {
       });
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* Step 1: Gemini image analysis                                           */
-    /* ---------------------------------------------------------------------- */
+  /* ---------------------------------------------------------------------- */
+/* Step 1: Independent Gemini visual analysis                              */
+/* ---------------------------------------------------------------------- */
 
-    const skinAnalysis = await analyzeSkinImage({
-      imagePath,
-      questionnaire,
-    });
+const visualAnalysis = await analyzeSkinImage({
+  imagePath,
+});
+
+/* ---------------------------------------------------------------------- */
+/* Step 2: Compare visual findings with questionnaire                      */
+/* ---------------------------------------------------------------------- */
+
+const assessmentResult = reconcileAssessment({
+  visualAnalysis,
+  questionnaire,
+});
+
+/*
+ * combinedAnalysis keeps the familiar skin-analysis structure,
+ * but its final values are produced after comparing the independent
+ * image findings with the user's reported experience.
+ */
+const skinAnalysis = assessmentResult.combinedAnalysis;
+
+/* ---------------------------------------------------------------------- */
+/* Step 3: Build category-based routine                                    */
+/* ---------------------------------------------------------------------- */
+
+const baseRoutine = buildRoutine(
+  skinAnalysis,
+  questionnaire
+);
 
     /* ---------------------------------------------------------------------- */
-    /* Step 2: Build category-based routine                                    */
-    /* ---------------------------------------------------------------------- */
-
-    const baseRoutine = buildRoutine(skinAnalysis, questionnaire);
-
-    /* ---------------------------------------------------------------------- */
-    /* Step 3: Attach verified local-catalogue products                        */
+    /* Step 4: Attach verified local-catalogue products                        */
     /* ---------------------------------------------------------------------- */
 
     const selectedResult = selectProductsForRoutine(
@@ -1967,7 +1988,7 @@ const analyzeSkin = async (req, res) => {
     );
 
     /* ---------------------------------------------------------------------- */
-    /* Step 4: Apply ingredient and user-safety rules                          */
+    /* Step 5: Apply ingredient and user-safety rules                          */
     /* ---------------------------------------------------------------------- */
 
     const safetyResult = validateRoutineSafety(
@@ -1977,7 +1998,7 @@ const analyzeSkin = async (req, res) => {
     );
 
     /* ---------------------------------------------------------------------- */
-    /* Step 5: Fit the complete routine to the user's total budget             */
+    /* Step 6: Fit the complete routine to the user's total budget             */
     /* ---------------------------------------------------------------------- */
 
     const budgetResult = optimizeRoutineForBudget(
@@ -1987,7 +2008,7 @@ const analyzeSkin = async (req, res) => {
     );
 
     /* ---------------------------------------------------------------------- */
-    /* Step 6: Apply weather and air-quality guidance                          */
+    /* Step 7: Apply weather and air-quality guidance                          */
     /* ---------------------------------------------------------------------- */
 
     const environment = questionnaire.environment || {};
@@ -2085,6 +2106,25 @@ const analyzeSkin = async (req, res) => {
     const result = {
       ...skinAnalysis,
 
+        assessment: {
+    visual: assessmentResult.visualAssessment,
+    reported: assessmentResult.reportedAssessment,
+    final: assessmentResult.finalAssessment,
+    conflicts: assessmentResult.conflicts,
+  },
+
+  visualAssessment:
+    assessmentResult.visualAssessment,
+
+  reportedAssessment:
+    assessmentResult.reportedAssessment,
+
+  finalAssessment:
+    assessmentResult.finalAssessment,
+
+  assessmentConflicts:
+    assessmentResult.conflicts,
+
       // Keep the existing frontend field names.
       morningRoutine,
       nightRoutine,
@@ -2104,14 +2144,16 @@ const analyzeSkin = async (req, res) => {
       budget: budgetResult.budget,
       weather: weatherResult.weather,
       missingProductSteps: selectedResult.missingSteps || [],
-      pipeline: {
-        analysis: "completed",
-        routineBuilder: "completed",
-        productSelector: "completed",
-        safetyEngine: "completed",
-        budgetEngine: "completed",
-        weatherEngine: "completed",
-      },
+    pipeline: {
+      independentVisualAnalysis: "completed",
+      questionnaireAssessment: "completed",
+      assessmentReconciliation: "completed",
+      routineBuilder: "completed",
+      productSelector: "completed",
+      safetyEngine: "completed",
+      budgetEngine: "completed",
+      weatherEngine: "completed",
+    },
     };
 
     console.log(
