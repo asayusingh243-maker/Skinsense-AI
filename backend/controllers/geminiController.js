@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const mime = require("mime-types");
 const productCatalog = require("../data/productCatalog");
+const SkinAnalysis = require("../models/SkinAnalysis");
 
 const { analyzeSkinImage } = require("../services/analysisService");
 const { buildRoutine } = require("../services/routineBuilder");
@@ -10,6 +11,9 @@ const { selectProductsForRoutine } = require("../services/productSelector");
 const { validateRoutineSafety } = require("../services/safetyEngine");
 const { optimizeRoutineForBudget } = require("../services/budgetEngine");
 const { applyWeatherGuidance } = require("../services/weatherEngine");
+const {
+  reconcileAssessment,
+} = require("../services/assessmentReconciliationService");
 
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -1213,16 +1217,29 @@ async function fetchProductPageImage(
       return "";
     }
   } catch (error) {
-    console.warn(
-      "Could not read product image metadata:",
-      getErrorMessage(error)
-    );
+    const message = getErrorMessage(error);
+
+    if (
+      error?.name === "AbortError" ||
+      message.toLowerCase().includes("terminated") ||
+      message.toLowerCase().includes("aborted")
+    ) {
+      console.warn(
+        `Product page image request timed out or was blocked: ${safePageUrl}`
+      );
+    } else {
+      console.warn(
+        `Could not retrieve product image from ${safePageUrl}:`,
+        message
+      );
+    }
 
     return "";
   } finally {
     clearTimeout(timeout);
   }
 }
+
 
 async function addMissingProductImages(
   products
@@ -1902,6 +1919,134 @@ function isQuotaError(error) {
   );
 }
 
+function normalizeSkinScore(value) {
+  const numericScore = Number(value);
+
+  if (!Number.isFinite(numericScore)) {
+    return null;
+  }
+
+  return Math.min(
+    100,
+    Math.max(0, Math.round(numericScore))
+  );
+}
+
+function calculateProgress(
+  currentSkinScore,
+  previousSkinScore
+) {
+  if (
+    currentSkinScore === null ||
+    previousSkinScore === null
+  ) {
+    return {
+      previousSkinScore,
+      scoreChange: null,
+      direction: "first-scan",
+    };
+  }
+
+  const scoreChange =
+    currentSkinScore - previousSkinScore;
+
+  let direction = "stable";
+
+  if (scoreChange > 0) {
+    direction = "improved";
+  }
+
+  if (scoreChange < 0) {
+    direction = "declined";
+  }
+
+  return {
+    previousSkinScore,
+    scoreChange,
+    direction,
+  };
+}
+
+function formatRoutineForDatabase(steps = []) {
+  if (!Array.isArray(steps)) {
+    return [];
+  }
+
+  return steps.map((step) => {
+    if (typeof step === "string") {
+      return {
+        category: "",
+        instruction: step,
+        completed: false,
+      };
+    }
+
+    return {
+      category:
+        step?.category ||
+        step?.name ||
+        "",
+      instruction:
+        step?.instruction ||
+        step?.usage ||
+        "",
+      completed: false,
+    };
+  });
+}
+
+function buildConcernHistory(skinAnalysis = {}) {
+  const concernNames = Array.isArray(
+    skinAnalysis.mainConcerns
+  )
+    ? skinAnalysis.mainConcerns
+    : [];
+
+  const concernSeverityFields = {
+    acne: skinAnalysis.acne,
+    pigmentation: skinAnalysis.pigmentation,
+    pores: skinAnalysis.pores,
+    hydration: skinAnalysis.hydration,
+    oiliness: skinAnalysis.oiliness,
+    sensitivity: skinAnalysis.sensitivity,
+  };
+
+  const normalizedConcernNames = new Set(
+    concernNames
+      .map((concern) =>
+        String(concern || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+
+  for (
+    const [name, severity]
+    of Object.entries(concernSeverityFields)
+  ) {
+    if (
+      severity &&
+      String(severity).trim()
+    ) {
+      normalizedConcernNames.add(name);
+    }
+  }
+
+  return Array.from(
+    normalizedConcernNames
+  ).map((name) => ({
+    name,
+    severity:
+      String(
+        concernSeverityFields[name] ||
+          "observed"
+      ).trim(),
+    score: null,
+  }));
+}
+
+
 /* -------------------------------------------------------------------------- */
 /*                                  Controller                                */
 /* -------------------------------------------------------------------------- */
@@ -1941,23 +2086,41 @@ const analyzeSkin = async (req, res) => {
       });
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* Step 1: Gemini image analysis                                           */
-    /* ---------------------------------------------------------------------- */
+  /* ---------------------------------------------------------------------- */
+/* Step 1: Independent Gemini visual analysis                              */
+/* ---------------------------------------------------------------------- */
 
-    const skinAnalysis = await analyzeSkinImage({
-      imagePath,
-      questionnaire,
-    });
+const visualAnalysis = await analyzeSkinImage({
+  imagePath,
+});
+
+/* ---------------------------------------------------------------------- */
+/* Step 2: Compare visual findings with questionnaire                      */
+/* ---------------------------------------------------------------------- */
+
+const assessmentResult = reconcileAssessment({
+  visualAnalysis,
+  questionnaire,
+});
+
+/*
+ * combinedAnalysis keeps the familiar skin-analysis structure,
+ * but its final values are produced after comparing the independent
+ * image findings with the user's reported experience.
+ */
+const skinAnalysis = assessmentResult.combinedAnalysis;
+
+/* ---------------------------------------------------------------------- */
+/* Step 3: Build category-based routine                                    */
+/* ---------------------------------------------------------------------- */
+
+const baseRoutine = buildRoutine(
+  skinAnalysis,
+  questionnaire
+);
 
     /* ---------------------------------------------------------------------- */
-    /* Step 2: Build category-based routine                                    */
-    /* ---------------------------------------------------------------------- */
-
-    const baseRoutine = buildRoutine(skinAnalysis, questionnaire);
-
-    /* ---------------------------------------------------------------------- */
-    /* Step 3: Attach verified local-catalogue products                        */
+    /* Step 4: Attach verified local-catalogue products                        */
     /* ---------------------------------------------------------------------- */
 
     const selectedResult = selectProductsForRoutine(
@@ -1967,7 +2130,7 @@ const analyzeSkin = async (req, res) => {
     );
 
     /* ---------------------------------------------------------------------- */
-    /* Step 4: Apply ingredient and user-safety rules                          */
+    /* Step 5: Apply ingredient and user-safety rules                          */
     /* ---------------------------------------------------------------------- */
 
     const safetyResult = validateRoutineSafety(
@@ -1977,7 +2140,7 @@ const analyzeSkin = async (req, res) => {
     );
 
     /* ---------------------------------------------------------------------- */
-    /* Step 5: Fit the complete routine to the user's total budget             */
+    /* Step 6: Fit the complete routine to the user's total budget             */
     /* ---------------------------------------------------------------------- */
 
     const budgetResult = optimizeRoutineForBudget(
@@ -1987,7 +2150,7 @@ const analyzeSkin = async (req, res) => {
     );
 
     /* ---------------------------------------------------------------------- */
-    /* Step 6: Apply weather and air-quality guidance                          */
+    /* Step 7: Apply weather and air-quality guidance                          */
     /* ---------------------------------------------------------------------- */
 
     const environment = questionnaire.environment || {};
@@ -2079,11 +2242,149 @@ const analyzeSkin = async (req, res) => {
       ? "No suitable products remained after routine, safety and budget processing."
       : "Products were selected from the verified local catalogue, checked by the safety and budget engines, and enriched with product-page images when available.";
 
-    const priceDisclaimer =
-      "Purchase links and catalogue prices may change on the seller's website. Patch-test new products before regular use.";
+     const priceDisclaimer =
+  "Purchase links and catalogue prices may change on the seller's website. Patch-test new products before regular use.";
+
+/* ---------------------------------------------------------------------- */
+/* Step 8: Compare with the user's previous scan                           */
+/* ---------------------------------------------------------------------- */
+
+const currentSkinScore =
+  normalizeSkinScore(
+    skinAnalysis.skinScore
+  );
+
+const previousAnalysis =
+  await SkinAnalysis.findOne({
+    user: req.user._id,
+  })
+    .sort({
+      createdAt: -1,
+    })
+    .select({
+      skinScore: 1,
+      createdAt: 1,
+    })
+    .lean();
+
+const previousSkinScore =
+  normalizeSkinScore(
+    previousAnalysis?.skinScore
+  );
+
+const progress = calculateProgress(
+  currentSkinScore,
+  previousSkinScore
+);
+
+/* ---------------------------------------------------------------------- */
+/* Step 9: Save the completed scan in MongoDB                              */
+/* ---------------------------------------------------------------------- */
+
+const savedAnalysis =
+  await SkinAnalysis.create({
+    user: req.user._id,
+
+    image: {
+      filename: safeImageName,
+      path: `/uploads/${safeImageName}`,
+      originalName: safeImageName,
+    },
+
+    questionnaire,
+
+    visualAssessment:
+      assessmentResult.visualAssessment,
+
+    reportedAssessment:
+      assessmentResult.reportedAssessment,
+
+    finalAssessment:
+      assessmentResult.finalAssessment,
+
+    conflicts:
+      assessmentResult.conflicts || [],
+
+    skinScore: currentSkinScore,
+
+    skinType:
+      skinAnalysis.skinType ||
+      assessmentResult.finalAssessment
+        ?.skinType ||
+      "Unknown",
+
+    concerns:
+      buildConcernHistory(
+        skinAnalysis
+      ),
+
+    morningRoutine:
+      formatRoutineForDatabase(
+        finalRoutine.morning
+      ),
+
+    nightRoutine:
+      formatRoutineForDatabase(
+        finalRoutine.night
+      ),
+
+    weeklyRoutine:
+      formatRoutineForDatabase(
+        finalRoutine.weekly
+      ),
+
+    products,
+    routineTotal,
+    detectedBudget,
+    budgetStatus,
+
+    weather:
+      weatherResult.weather || {},
+
+    safety:
+      safetyResult.safety || {},
+
+    progress,
+
+    analysisVersion: "2.0",
+  });
+
 
     const result = {
       ...skinAnalysis,
+          
+      analysisId:
+  savedAnalysis._id.toString(),
+
+createdAt:
+  savedAnalysis.createdAt,
+
+image: savedAnalysis.image,
+
+progress: {
+  ...progress,
+  previousAnalysisDate:
+    previousAnalysis?.createdAt ||
+    null,
+},
+        assessment: {
+    visual: assessmentResult.visualAssessment,
+    reported: assessmentResult.reportedAssessment,
+    final: assessmentResult.finalAssessment,
+    conflicts: assessmentResult.conflicts,
+  },
+
+  visualAssessment:
+    assessmentResult.visualAssessment,
+
+  reportedAssessment:
+    assessmentResult.reportedAssessment,
+
+  finalAssessment:
+    assessmentResult.finalAssessment,
+
+  assessmentConflicts:
+    assessmentResult.conflicts,
 
       // Keep the existing frontend field names.
       morningRoutine,
@@ -2104,14 +2405,18 @@ const analyzeSkin = async (req, res) => {
       budget: budgetResult.budget,
       weather: weatherResult.weather,
       missingProductSteps: selectedResult.missingSteps || [],
-      pipeline: {
-        analysis: "completed",
-        routineBuilder: "completed",
-        productSelector: "completed",
-        safetyEngine: "completed",
-        budgetEngine: "completed",
-        weatherEngine: "completed",
-      },
+    pipeline: {
+      independentVisualAnalysis: "completed",
+      questionnaireAssessment: "completed",
+      assessmentReconciliation: "completed",
+      routineBuilder: "completed",
+      productSelector: "completed",
+      safetyEngine: "completed",
+      budgetEngine: "completed",
+      weatherEngine: "completed",
+      progressComparison: "completed",
+      scanHistoryStorage: "completed",
+    },
     };
 
     console.log(

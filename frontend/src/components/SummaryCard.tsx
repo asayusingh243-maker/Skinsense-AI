@@ -7,56 +7,77 @@ import {
   FaChartLine,
 } from "react-icons/fa";
 
-const summary = [
-  {
-    title: "Skin Score",
-    value: "92%",
-    icon: <FaStar className="text-yellow-500 text-3xl" />,
-  },
-  {
-    title: "Skin Type",
-    value: "Combination",
-    icon: <FaUserCircle className="text-pink-500 text-3xl" />,
-  },
-  {
-    title: "Skin Tone",
-    value: "Warm",
-    icon: <FaTint className="text-blue-500 text-3xl" />,
-  },
-  {
-    title: "Weather",
-    value: "34°C Sunny",
-    icon: <FaCloudSun className="text-orange-500 text-3xl" />,
-  },
-  {
-    title: "Budget",
-    value: "₹1000",
-    icon: <FaWallet className="text-green-600 text-3xl" />,
-  },
-  {
-    title: "Progress",
-    value: "Excellent",
-    icon: <FaChartLine className="text-purple-500 text-3xl" />,
-  },
-];
+type SummaryCardProps = {
+  skinScore: number;
+  skinType: string;
+  skinTone: string;
+  weather: string;
+  budget: number | string;
+  progress: string;
+};
 
-export default function SummaryCard() {
+export default function SummaryCard({
+  skinScore,
+  skinType,
+  skinTone,
+  weather,
+  budget,
+  progress,
+}: SummaryCardProps) {
+  const summary = [
+    {
+      title: "Skin Score",
+      value: `${skinScore}/100`,
+      icon: <FaStar className="text-3xl text-yellow-500" />,
+    },
+    {
+      title: "Skin Type",
+      value: skinType || "Not available",
+      icon: <FaUserCircle className="text-3xl text-pink-500" />,
+    },
+    {
+      title: "Skin Tone",
+      value: skinTone || "Not available",
+      icon: <FaTint className="text-3xl text-blue-500" />,
+    },
+    {
+      title: "Weather",
+      value: weather || "Not available",
+      icon: <FaCloudSun className="text-3xl text-orange-500" />,
+    },
+    {
+      title: "Budget",
+      value:
+        budget === 0 || budget === "0"
+          ? "Not available"
+          : String(budget).startsWith("₹")
+            ? String(budget)
+            : `₹${budget}`,
+      icon: <FaWallet className="text-3xl text-green-600" />,
+    },
+    {
+      title: "Progress",
+      value: progress,
+      icon: <FaChartLine className="text-3xl text-purple-500" />,
+    },
+  ];
+
   return (
-    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mt-10">
-      {summary.map((item, index) => (
+    <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      {summary.map((item) => (
         <div
-          key={index}
-          className="bg-white rounded-2xl shadow-lg p-6 hover:-translate-y-2 hover:shadow-pink-300 transition-all duration-300"
+          key={item.title}
+          className="rounded-2xl bg-white p-6 shadow-lg transition-all duration-300 hover:-translate-y-2 hover:shadow-pink-300"
         >
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             {item.icon}
 
-            <span className="text-2xl font-bold text-gray-800">
+            <span className="text-right text-2xl font-bold text-gray-800">
               {item.value}
             </span>
           </div>
 
-          <p className="mt-5 text-gray-500 font-medium">
+          <p className="mt-5 font-medium text-gray-500">
             {item.title}
           </p>
         </div>

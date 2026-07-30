@@ -1,15 +1,40 @@
 const mongoose = require("mongoose");
 
-const connectDB = async () => {
+const connectDatabase = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
+    if (!process.env.MONGO_URI) {
+      throw new Error(
+        "MONGO_URI is missing from the backend .env file."
+      );
+    }
 
-    console.log("✅ MongoDB Connected Successfully");
+    await mongoose.connect(
+      process.env.MONGO_URI,
+      {
+        serverSelectionTimeoutMS: 15000,
+        connectTimeoutMS: 15000,
+        socketTimeoutMS: 45000,
+        maxPoolSize: 10,
+      }
+    );
+
+    /*
+     * Confirm that Atlas accepts a real database
+     * command, not only the initial connection.
+     */
+    await mongoose.connection.db.admin().ping();
+
+    console.log(
+      "✅ MongoDB Connected and Pinged Successfully"
+    );
   } catch (error) {
-    console.error("❌ MongoDB Connection Failed");
-    console.error(error.message);
+    console.error(
+      "❌ MongoDB connection failed:",
+      error
+    );
+
     process.exit(1);
   }
 };
 
-module.exports = connectDB;
+module.exports = connectDatabase;
