@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const mime = require("mime-types");
 const productCatalog = require("../data/productCatalog");
+const SkinAnalysis = require("../models/SkinAnalysis");
 
 const { analyzeSkinImage } = require("../services/analysisService");
 const { buildRoutine } = require("../services/routineBuilder");
@@ -1216,16 +1217,29 @@ async function fetchProductPageImage(
       return "";
     }
   } catch (error) {
-    console.warn(
-      "Could not read product image metadata:",
-      getErrorMessage(error)
-    );
+    const message = getErrorMessage(error);
+
+    if (
+      error?.name === "AbortError" ||
+      message.toLowerCase().includes("terminated") ||
+      message.toLowerCase().includes("aborted")
+    ) {
+      console.warn(
+        `Product page image request timed out or was blocked: ${safePageUrl}`
+      );
+    } else {
+      console.warn(
+        `Could not retrieve product image from ${safePageUrl}:`,
+        message
+      );
+    }
 
     return "";
   } finally {
     clearTimeout(timeout);
   }
 }
+
 
 async function addMissingProductImages(
   products
@@ -1905,6 +1919,134 @@ function isQuotaError(error) {
   );
 }
 
+function normalizeSkinScore(value) {
+  const numericScore = Number(value);
+
+  if (!Number.isFinite(numericScore)) {
+    return null;
+  }
+
+  return Math.min(
+    100,
+    Math.max(0, Math.round(numericScore))
+  );
+}
+
+function calculateProgress(
+  currentSkinScore,
+  previousSkinScore
+) {
+  if (
+    currentSkinScore === null ||
+    previousSkinScore === null
+  ) {
+    return {
+      previousSkinScore,
+      scoreChange: null,
+      direction: "first-scan",
+    };
+  }
+
+  const scoreChange =
+    currentSkinScore - previousSkinScore;
+
+  let direction = "stable";
+
+  if (scoreChange > 0) {
+    direction = "improved";
+  }
+
+  if (scoreChange < 0) {
+    direction = "declined";
+  }
+
+  return {
+    previousSkinScore,
+    scoreChange,
+    direction,
+  };
+}
+
+function formatRoutineForDatabase(steps = []) {
+  if (!Array.isArray(steps)) {
+    return [];
+  }
+
+  return steps.map((step) => {
+    if (typeof step === "string") {
+      return {
+        category: "",
+        instruction: step,
+        completed: false,
+      };
+    }
+
+    return {
+      category:
+        step?.category ||
+        step?.name ||
+        "",
+      instruction:
+        step?.instruction ||
+        step?.usage ||
+        "",
+      completed: false,
+    };
+  });
+}
+
+function buildConcernHistory(skinAnalysis = {}) {
+  const concernNames = Array.isArray(
+    skinAnalysis.mainConcerns
+  )
+    ? skinAnalysis.mainConcerns
+    : [];
+
+  const concernSeverityFields = {
+    acne: skinAnalysis.acne,
+    pigmentation: skinAnalysis.pigmentation,
+    pores: skinAnalysis.pores,
+    hydration: skinAnalysis.hydration,
+    oiliness: skinAnalysis.oiliness,
+    sensitivity: skinAnalysis.sensitivity,
+  };
+
+  const normalizedConcernNames = new Set(
+    concernNames
+      .map((concern) =>
+        String(concern || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+
+  for (
+    const [name, severity]
+    of Object.entries(concernSeverityFields)
+  ) {
+    if (
+      severity &&
+      String(severity).trim()
+    ) {
+      normalizedConcernNames.add(name);
+    }
+  }
+
+  return Array.from(
+    normalizedConcernNames
+  ).map((name) => ({
+    name,
+    severity:
+      String(
+        concernSeverityFields[name] ||
+          "observed"
+      ).trim(),
+    score: null,
+  }));
+}
+
+
 /* -------------------------------------------------------------------------- */
 /*                                  Controller                                */
 /* -------------------------------------------------------------------------- */
@@ -2100,12 +2242,131 @@ const baseRoutine = buildRoutine(
       ? "No suitable products remained after routine, safety and budget processing."
       : "Products were selected from the verified local catalogue, checked by the safety and budget engines, and enriched with product-page images when available.";
 
-    const priceDisclaimer =
-      "Purchase links and catalogue prices may change on the seller's website. Patch-test new products before regular use.";
+     const priceDisclaimer =
+  "Purchase links and catalogue prices may change on the seller's website. Patch-test new products before regular use.";
+
+/* ---------------------------------------------------------------------- */
+/* Step 8: Compare with the user's previous scan                           */
+/* ---------------------------------------------------------------------- */
+
+const currentSkinScore =
+  normalizeSkinScore(
+    skinAnalysis.skinScore
+  );
+
+const previousAnalysis =
+  await SkinAnalysis.findOne({
+    user: req.user._id,
+  })
+    .sort({
+      createdAt: -1,
+    })
+    .select({
+      skinScore: 1,
+      createdAt: 1,
+    })
+    .lean();
+
+const previousSkinScore =
+  normalizeSkinScore(
+    previousAnalysis?.skinScore
+  );
+
+const progress = calculateProgress(
+  currentSkinScore,
+  previousSkinScore
+);
+
+/* ---------------------------------------------------------------------- */
+/* Step 9: Save the completed scan in MongoDB                              */
+/* ---------------------------------------------------------------------- */
+
+const savedAnalysis =
+  await SkinAnalysis.create({
+    user: req.user._id,
+
+    image: {
+      filename: safeImageName,
+      path: `/uploads/${safeImageName}`,
+      originalName: safeImageName,
+    },
+
+    questionnaire,
+
+    visualAssessment:
+      assessmentResult.visualAssessment,
+
+    reportedAssessment:
+      assessmentResult.reportedAssessment,
+
+    finalAssessment:
+      assessmentResult.finalAssessment,
+
+    conflicts:
+      assessmentResult.conflicts || [],
+
+    skinScore: currentSkinScore,
+
+    skinType:
+      skinAnalysis.skinType ||
+      assessmentResult.finalAssessment
+        ?.skinType ||
+      "Unknown",
+
+    concerns:
+      buildConcernHistory(
+        skinAnalysis
+      ),
+
+    morningRoutine:
+      formatRoutineForDatabase(
+        finalRoutine.morning
+      ),
+
+    nightRoutine:
+      formatRoutineForDatabase(
+        finalRoutine.night
+      ),
+
+    weeklyRoutine:
+      formatRoutineForDatabase(
+        finalRoutine.weekly
+      ),
+
+    products,
+    routineTotal,
+    detectedBudget,
+    budgetStatus,
+
+    weather:
+      weatherResult.weather || {},
+
+    safety:
+      safetyResult.safety || {},
+
+    progress,
+
+    analysisVersion: "2.0",
+  });
+
 
     const result = {
       ...skinAnalysis,
+          
+      analysisId:
+  savedAnalysis._id.toString(),
 
+createdAt:
+  savedAnalysis.createdAt,
+
+image: savedAnalysis.image,
+
+progress: {
+  ...progress,
+  previousAnalysisDate:
+    previousAnalysis?.createdAt ||
+    null,
+},
         assessment: {
     visual: assessmentResult.visualAssessment,
     reported: assessmentResult.reportedAssessment,
@@ -2153,6 +2414,8 @@ const baseRoutine = buildRoutine(
       safetyEngine: "completed",
       budgetEngine: "completed",
       weatherEngine: "completed",
+      progressComparison: "completed",
+      scanHistoryStorage: "completed",
     },
     };
 

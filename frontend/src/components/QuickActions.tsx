@@ -1,3 +1,6 @@
+"use client";
+
+import Link from "next/link";
 import {
   FaClipboardList,
   FaShoppingBag,
@@ -7,14 +10,17 @@ import {
 const actions = [
   {
     title: "View Routine",
+    href: "/routine",
     icon: <FaClipboardList className="text-3xl text-pink-500" />,
   },
   {
     title: "Recommendations",
+    href: "/recommendations",
     icon: <FaShoppingBag className="text-3xl text-green-500" />,
   },
   {
     title: "Analyze Again",
+    href: "/analyze",
     icon: <FaCamera className="text-3xl text-blue-500" />,
   },
 ];
@@ -22,15 +28,16 @@ const actions = [
 export default function QuickActions() {
   return (
     <div className="mt-10">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">
+      <h2 className="mb-6 text-2xl font-bold text-gray-800">
         Quick Actions
       </h2>
 
-      <div className="grid md:grid-cols-3 gap-6">
-        {actions.map((action, index) => (
-          <button
-            key={index}
-            className="bg-white rounded-2xl shadow-lg p-6 hover:-translate-y-2 hover:shadow-pink-300 transition-all duration-300"
+      <div className="grid gap-6 md:grid-cols-3">
+        {actions.map((action) => (
+          <Link
+            key={action.title}
+            href={action.href}
+            className="rounded-2xl bg-white p-6 shadow-lg transition-all duration-300 hover:-translate-y-2 hover:shadow-pink-300"
           >
             <div className="flex flex-col items-center">
               {action.icon}
@@ -39,7 +46,7 @@ export default function QuickActions() {
                 {action.title}
               </p>
             </div>
-          </button>
+          </Link>
         ))}
       </div>
     </div>
