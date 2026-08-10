@@ -14,6 +14,8 @@ const dashboardRoutes = require("./routes/dashboard");
 const path = require("path");
 const environmentRoutes =
   require("./routes/environment");
+  const progressRoutes =
+  require("./routes/progress");
 
 
 const app = express();
@@ -83,6 +85,12 @@ app.use(
   environmentRoutes
 
 );
+
+app.use(
+  "/api/progress",
+  progressRoutes
+);
+
 
 app.use(
   "/api/analysis",
