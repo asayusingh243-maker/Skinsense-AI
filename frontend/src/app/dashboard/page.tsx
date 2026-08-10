@@ -7,6 +7,7 @@ import UploadCard from "@/components/UploadCard";
 import SummaryCard from "@/components/SummaryCard";
 import QuickActions from "@/components/QuickActions";
 import RecentAnalysis from "@/components/RecentAnalysis";
+import DashboardHero from "@/components/DashboardHero";
 
 type DashboardData = {
   user: {
@@ -14,23 +15,31 @@ type DashboardData = {
     name: string;
     email: string;
   };
-hero: {
-  image: unknown;
-  skinScore: number;
-  skinType: string;
-  skinTone: string;
-  budget: number | string;
-  weather: string;
-  lastScan: string | null;
-  change: number;
-  direction: "improved" | "declined" | "stable";
-};
+
+  hero: {
+    image: unknown;
+    skinScore: number;
+    skinType: string;
+    skinTone: string;
+    budget: number | string;
+    weather: string;
+    lastScan: string | null;
+    change: number;
+    direction:
+      | "improved"
+      | "declined"
+      | "stable"
+      | "first-scan";
+  };
+
   todayInsight: string[];
+
   quickStats: {
     totalScans: number;
     routineCompletion: number;
     currentStreak: number;
   };
+
   recentScans: {
     id: string;
     skinScore: number;
@@ -39,38 +48,15 @@ hero: {
   }[];
 };
 
-function getGreeting() {
-  const hour = new Date().getHours();
-
-  if (hour < 12) {
-    return "Good Morning";
-  }
-
-  if (hour < 17) {
-    return "Good Afternoon";
-  }
-
-  return "Good Evening";
-}
-
-function formatLastScan(date: string | null) {
-  if (!date) {
-    return "No scans completed yet";
-  }
-
-  return new Date(date).toLocaleString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
 export default function Dashboard() {
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [dashboard, setDashboard] =
+    useState<DashboardData | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -91,7 +77,8 @@ export default function Dashboard() {
 
         if (!response.ok || !result.success) {
           throw new Error(
-            result.message || "Unable to load dashboard."
+            result.message ||
+              "Unable to load dashboard."
           );
         }
 
@@ -145,7 +132,9 @@ export default function Dashboard() {
 
             <button
               type="button"
-              onClick={() => window.location.reload()}
+              onClick={() =>
+                window.location.reload()
+              }
               className="mt-6 rounded-xl bg-pink-600 px-6 py-3 font-semibold text-white transition hover:bg-pink-700"
             >
               Try Again
@@ -156,119 +145,34 @@ export default function Dashboard() {
     );
   }
 
-  const { user, hero, todayInsight, quickStats } =
-    dashboard;
-    const imageValue =
-  typeof hero.image === "string"
-    ? hero.image
-    : hero.image &&
-        typeof hero.image === "object" &&
-        "url" in hero.image
-      ? String(hero.image.url)
-      : "";
+  const {
+    user,
+    hero,
+    todayInsight,
+    quickStats,
+    recentScans,
+  } = dashboard;
 
-const latestImageUrl = imageValue
-  ? imageValue.startsWith("http")
-    ? imageValue
-    : `http://localhost:5000${
-        imageValue.startsWith("/") ? "" : "/"
-      }${imageValue}`
-  : "";
-  console.log("Dashboard hero image:", hero.image);
+  const progressText =
+    hero.direction === "improved"
+      ? "Improving"
+      : hero.direction === "declined"
+        ? "Needs Attention"
+        : hero.direction === "first-scan"
+          ? "First Scan"
+          : "Stable";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50">
       <DashboardNavbar />
 
       <main className="mx-auto max-w-7xl px-5 py-10 sm:px-8">
-        <section>
-          <h1 className="text-4xl font-bold text-gray-800 sm:text-5xl">
-            {getGreeting()}, {user.name || "User"} 👋
-          </h1>
+        <DashboardHero
+          user={user}
+          hero={hero}
+        />
 
-          <p className="mb-10 mt-4 text-lg text-gray-600">
-            Welcome back! Continue your personalized
-            skincare journey with AI-powered insights.
-          </p>
-        </section>
-
-        <section className="mb-8 overflow-hidden rounded-3xl border border-pink-100 bg-white shadow-sm">
-          <div className="grid gap-8 p-6 md:grid-cols-2 md:p-8">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wider text-pink-600">
-                Latest skin analysis
-              </p>
-
-              <h2 className="mt-3 text-3xl font-bold text-gray-800">
-                Skin Health Score
-              </h2>
-
-              <div className="mt-6 flex items-end gap-3">
-                <span className="text-6xl font-bold text-pink-600">
-                  {hero.skinScore}
-                </span>
-
-                <span className="mb-2 text-xl text-gray-500">
-                  / 100
-                </span>
-              </div>
-
-              <div className="mt-4">
-                {hero.direction === "improved" && (
-                  <p className="font-semibold text-green-600">
-                    ↑ {hero.change} points since your
-                    previous scan
-                  </p>
-                )}
-
-                {hero.direction === "declined" && (
-                  <p className="font-semibold text-red-600">
-                    ↓ {Math.abs(hero.change)} points since
-                    your previous scan
-                  </p>
-                )}
-
-                {hero.direction === "stable" && (
-                  <p className="font-semibold text-gray-500">
-                    Your score is currently stable
-                  </p>
-                )}
-              </div>
-
-              <p className="mt-4 text-sm text-gray-500">
-                Last scan: {formatLastScan(hero.lastScan)}
-              </p>
-            </div>
-
-            <div className="flex min-h-64 items-center justify-center overflow-hidden rounded-2xl bg-pink-50">
-  {latestImageUrl ? (
-    <img
-      src={latestImageUrl}
-      alt="Latest skin analysis"
-      className="h-full max-h-80 w-full object-cover"
-      onError={(event) => {
-        event.currentTarget.style.display = "none";
-      }}
-    />
-  ) : (
-    <div className="px-6 text-center">
-      <div className="text-5xl">📷</div>
-
-      <p className="mt-4 font-semibold text-gray-700">
-        No scan image available
-      </p>
-
-      <p className="mt-2 text-sm text-gray-500">
-        Complete a skin analysis to see your latest image here.
-      </p>
-    </div>
-  )}
-</div>
-
-          </div>
-        </section>
-
-        <section className="mb-8 grid gap-5 sm:grid-cols-3">
+        <section className="mb-8 mt-8 grid gap-5 sm:grid-cols-3">
           <div className="rounded-2xl border border-pink-100 bg-white p-6 shadow-sm">
             <p className="text-sm text-gray-500">
               Total Scans
@@ -305,41 +209,49 @@ const latestImageUrl = imageValue
             Today&apos;s AI Insights
           </h2>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {todayInsight.map((insight, index) => (
-              <div
-                key={`${insight}-${index}`}
-                className="rounded-2xl bg-purple-50 p-5"
-              >
-                <span className="text-2xl">✨</span>
+          {todayInsight.length === 0 ? (
+            <div className="mt-5 rounded-2xl bg-purple-50 p-5 text-gray-600">
+              No AI insights are available yet.
+            </div>
+          ) : (
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              {todayInsight.map(
+                (insight, index) => (
+                  <div
+                    key={`${insight}-${index}`}
+                    className="rounded-2xl bg-purple-50 p-5"
+                  >
+                    <span className="text-2xl">
+                      ✨
+                    </span>
 
-                <p className="mt-3 text-gray-700">
-                  {insight}
-                </p>
-              </div>
-            ))}
-          </div>
+                    <p className="mt-3 text-gray-700">
+                      {insight}
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+          )}
         </section>
 
         <div className="space-y-8">
           <UploadCard />
-           <SummaryCard
-  skinScore={hero.skinScore}
-  skinType={hero.skinType}
-  skinTone={hero.skinTone}
-  weather={hero.weather}
-  budget={hero.budget}
-  progress={
-    hero.direction === "improved"
-      ? "Improving"
-      : hero.direction === "declined"
-      ? "Needs Attention"
-      : "Stable"
-  }
-/>
-          
+
+          <SummaryCard
+            skinScore={hero.skinScore}
+            skinType={hero.skinType}
+            skinTone={hero.skinTone}
+            weather={hero.weather}
+            budget={hero.budget}
+            progress={progressText}
+          />
+
           <QuickActions />
-          <RecentAnalysis scans={dashboard.recentScans} />
+
+          <RecentAnalysis
+            scans={recentScans}
+          />
         </div>
       </main>
     </div>

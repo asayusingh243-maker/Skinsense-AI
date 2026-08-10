@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import AssessmentExplanation from "@/components/AssessmentExplanation";
 import {
   FaArrowLeft,
   FaCheckCircle,
@@ -69,6 +70,24 @@ type LatestAnalysis = {
       score?: number | null;
     }[];
   };
+
+  assessment: {
+  visual: Record<string, unknown>;
+  reported: Record<string, unknown>;
+  final: {
+    skinType?: string;
+    confidence?: string;
+    conflictDetected?: boolean;
+    conflictCount?: number;
+    explanation?: string[];
+  };
+  conflicts: {
+    field?: string;
+    visualValue?: string;
+    reportedValue?: string;
+    explanation?: string;
+  }[];
+};
 
   routine: {
     morning: RoutineStep[];
@@ -329,8 +348,16 @@ export default function RoutinePage() {
     );
   }
 
-  const { scan, skin, routine, budget, weather, safety, insights } =
-    analysis;
+const {
+  scan,
+  skin,
+  assessment,
+  routine,
+  budget,
+  weather,
+  safety,
+  insights,
+} = analysis;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 px-5 py-8 sm:px-8">
@@ -408,6 +435,14 @@ export default function RoutinePage() {
             </div>
           </div>
         </section>
+        <div className="mt-8">
+  <AssessmentExplanation
+    visualAssessment={assessment.visual}
+    reportedAssessment={assessment.reported}
+    finalAssessment={assessment.final}
+    conflicts={assessment.conflicts}
+  />
+</div>
 
         <div className="mt-8 grid gap-8 lg:grid-cols-2">
           <RoutineSection

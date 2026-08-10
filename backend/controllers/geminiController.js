@@ -1211,6 +1211,7 @@ async function fetchProductPageImage(
           rawImageUrl,
           response.url ||
             safePageUrl
+            
         ).toString()
       );
     } catch {
