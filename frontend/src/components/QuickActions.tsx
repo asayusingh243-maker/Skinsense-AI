@@ -5,26 +5,39 @@ import {
   FaClipboardList,
   FaShoppingBag,
   FaCamera,
+  FaChartLine,
 } from "react-icons/fa";
 
 const actions = [
   {
     title: "View Routine",
     href: "/routine",
-    icon: <FaClipboardList className="text-3xl text-pink-500" />,
+    icon: (
+      <FaClipboardList className="text-3xl text-pink-500" />
+    ),
   },
   {
     title: "Recommendations",
     href: "/recommendations",
-    icon: <FaShoppingBag className="text-3xl text-green-500" />,
+    icon: (
+      <FaShoppingBag className="text-3xl text-green-500" />
+    ),
+  },
+  {
+    title: "Progress",
+    href: "/progress",
+    icon: (
+      <FaChartLine className="text-3xl text-purple-500" />
+    ),
   },
   {
     title: "Analyze Again",
     href: "/analyze",
-    icon: <FaCamera className="text-3xl text-blue-500" />,
+    icon: (
+      <FaCamera className="text-3xl text-blue-500" />
+    ),
   },
 ];
-
 export default function QuickActions() {
   return (
     <div className="mt-10">
