@@ -10,6 +10,8 @@ import {
   FaChartLine,
 } from "react-icons/fa";
 
+import SkinScoreTrend from "@/components/SkinScoreTrend";
+
 type MetricChange = {
   previous: string;
   current: string;
@@ -19,6 +21,8 @@ type MetricChange = {
     | "stable"
     | "unknown";
 };
+
+
 
 type ProgressData = {
   status:
@@ -281,6 +285,27 @@ export default function ProgressPage() {
   const overallChange =
     overall?.change ?? 0;
 
+  const history = [
+    ...(previous && previous.skinScore !== null
+      ? [
+          {
+            id: previous.id,
+            date: previous.date,
+            skinScore: previous.skinScore,
+          },
+        ]
+      : []),
+    ...(latest && latest.skinScore !== null
+      ? [
+          {
+            id: latest.id,
+            date: latest.date,
+            skinScore: latest.skinScore,
+          },
+        ]
+      : []),
+  ];
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 px-5 py-8 sm:px-8">
       <div className="mx-auto max-w-7xl">
@@ -386,12 +411,17 @@ export default function ProgressPage() {
           </div>
         </section>
 
+        {/* Skin Score History Chart */}
+        <div className="mt-8">
+          <SkinScoreTrend history={history} />
+        </div>
+
+        {/* Metric Comparison */}
         <section className="mt-8">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-purple-600">
               Metric Comparison
             </p>
-
             <h2 className="mt-2 text-3xl font-bold text-gray-900">
               What changed?
             </h2>

@@ -35,7 +35,11 @@ const weatherDescriptions = {
   99: "Thunderstorm with heavy hail",
 };
 
-function isValidCoordinate(value, minimum, maximum) {
+function isValidCoordinate(
+  value,
+  minimum,
+  maximum
+) {
   const number = Number(value);
 
   return (
@@ -45,116 +49,264 @@ function isValidCoordinate(value, minimum, maximum) {
   );
 }
 
-async function fetchJson(url) {
-  const controller = new AbortController();
-
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 12000);
-
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Environmental API returned status ${response.status}.`
-      );
-    }
-
-    return await response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
+function sleep(ms) {
+  return new Promise((resolve) =>
+    setTimeout(resolve, ms)
+  );
 }
 
-exports.getEnvironment = async (req, res) => {
+async function fetchJson(
+  url,
+  {
+    timeoutMs = 20000,
+    retries = 2,
+  } = {}
+) {
+  let lastError = null;
+
+  for (
+    let attempt = 0;
+    attempt <= retries;
+    attempt += 1
+  ) {
+    const controller =
+      new AbortController();
+
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+
+        headers: {
+          Accept: "application/json",
+          "User-Agent":
+            "SkinSense-AI/1.0",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Environmental API returned status ${response.status}.`
+        );
+      }
+
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+
+      console.warn(
+        `Environmental API attempt ${
+          attempt + 1
+        } failed:`,
+        error?.message || error
+      );
+
+      if (attempt < retries) {
+        await sleep(
+          1000 * (attempt + 1)
+        );
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError;
+}
+
+exports.getEnvironment = async (
+  req,
+  res
+) => {
   try {
-    const { latitude, longitude } = req.body;
+    const {
+      latitude,
+      longitude,
+    } = req.body;
 
     if (
-      !isValidCoordinate(latitude, -90, 90) ||
-      !isValidCoordinate(longitude, -180, 180)
+      !isValidCoordinate(
+        latitude,
+        -90,
+        90
+      ) ||
+      !isValidCoordinate(
+        longitude,
+        -180,
+        180
+      )
     ) {
       return res.status(400).json({
         success: false,
+
         message:
           "Valid latitude and longitude are required.",
       });
     }
 
-    const latitudeNumber = Number(latitude);
-    const longitudeNumber = Number(longitude);
+    const latitudeNumber =
+      Number(latitude);
 
-    const weatherParams = new URLSearchParams({
-      latitude: String(latitudeNumber),
-      longitude: String(longitudeNumber),
-      current: [
-        "temperature_2m",
-        "relative_humidity_2m",
-        "apparent_temperature",
-        "precipitation",
-        "weather_code",
-      ].join(","),
-      daily: "uv_index_max",
-      forecast_days: "1",
-      timezone: "auto",
-    });
+    const longitudeNumber =
+      Number(longitude);
 
-    const airQualityParams = new URLSearchParams({
-      latitude: String(latitudeNumber),
-      longitude: String(longitudeNumber),
-      current: [
-        "us_aqi",
-        "pm2_5",
-        "pm10",
-        "ozone",
-        "uv_index",
-      ].join(","),
-      timezone: "auto",
-    });
+    const weatherParams =
+      new URLSearchParams({
+        latitude:
+          String(latitudeNumber),
 
-    const [weatherData, airQualityData] =
-      await Promise.all([
-        fetchJson(
-          `${WEATHER_API}?${weatherParams.toString()}`
-        ),
-        fetchJson(
-          `${AIR_QUALITY_API}?${airQualityParams.toString()}`
-        ),
-      ]);
+        longitude:
+          String(longitudeNumber),
 
-    const weather = weatherData.current || {};
-    const airQuality = airQualityData.current || {};
+        current: [
+          "temperature_2m",
+          "relative_humidity_2m",
+          "apparent_temperature",
+          "precipitation",
+          "weather_code",
+        ].join(","),
 
-    const weatherCode = Number(
-      weather.weather_code
-    );
+        daily:
+          "uv_index_max",
 
-    const currentUv = Number(
-      airQuality.uv_index
-    );
+        forecast_days: "1",
 
-    const dailyUv = Number(
-      weatherData.daily?.uv_index_max?.[0]
-    );
+        timezone: "auto",
+      });
+
+    const airQualityParams =
+      new URLSearchParams({
+        latitude:
+          String(latitudeNumber),
+
+        longitude:
+          String(longitudeNumber),
+
+        current: [
+          "us_aqi",
+          "pm2_5",
+          "pm10",
+          "ozone",
+          "uv_index",
+        ].join(","),
+
+        timezone: "auto",
+      });
+
+    /*
+     * IMPORTANT:
+     *
+     * Do not use Promise.all here.
+     *
+     * Weather and air-quality should fail
+     * independently.
+     */
+    const [
+      weatherResult,
+      airQualityResult,
+    ] = await Promise.allSettled([
+      fetchJson(
+        `${WEATHER_API}?${weatherParams.toString()}`
+      ),
+
+      fetchJson(
+        `${AIR_QUALITY_API}?${airQualityParams.toString()}`
+      ),
+    ]);
+
+    const weatherData =
+      weatherResult.status ===
+      "fulfilled"
+        ? weatherResult.value
+        : null;
+
+    const airQualityData =
+      airQualityResult.status ===
+      "fulfilled"
+        ? airQualityResult.value
+        : null;
+
+    if (!weatherData) {
+      console.error(
+        "Weather API failed:",
+        weatherResult.status ===
+          "rejected"
+          ? weatherResult.reason
+          : "Unknown error"
+      );
+    }
+
+    if (!airQualityData) {
+      console.error(
+        "Air-quality API failed:",
+        airQualityResult.status ===
+          "rejected"
+          ? airQualityResult.reason
+          : "Unknown error"
+      );
+    }
+
+    /*
+     * We require weather data because
+     * temperature/humidity are essential
+     * for SkinSense.
+     *
+     * Air-quality can be optional.
+     */
+    if (!weatherData) {
+      return res.status(503).json({
+        success: false,
+
+        message:
+          "Current weather service is temporarily unavailable. Please try again shortly.",
+      });
+    }
+
+    const weather =
+      weatherData.current || {};
+
+    const airQuality =
+      airQualityData?.current || {};
+
+    const weatherCode =
+      Number(
+        weather.weather_code
+      );
+
+    const currentUv =
+      Number(
+        airQuality.uv_index
+      );
+
+    const dailyUv =
+      Number(
+        weatherData.daily
+          ?.uv_index_max?.[0]
+      );
 
     const environment = {
       temperatureC:
-        Number(weather.temperature_2m) || 0,
+        Number(
+          weather.temperature_2m
+        ) || 0,
 
       apparentTemperatureC:
-        Number(weather.apparent_temperature) || 0,
+        Number(
+          weather.apparent_temperature
+        ) || 0,
 
       humidityPercent:
-        Number(weather.relative_humidity_2m) || 0,
+        Number(
+          weather.relative_humidity_2m
+        ) || 0,
 
       precipitationMm:
-        Number(weather.precipitation) || 0,
+        Number(
+          weather.precipitation
+        ) || 0,
 
       weatherCode:
         Number.isFinite(weatherCode)
@@ -162,43 +314,69 @@ exports.getEnvironment = async (req, res) => {
           : null,
 
       weatherCondition:
-        weatherDescriptions[weatherCode] ||
+        weatherDescriptions[
+          weatherCode
+        ] ||
         "Weather condition unavailable",
 
       uvIndex:
         Number.isFinite(currentUv)
           ? currentUv
-          : Number.isFinite(dailyUv)
+          : Number.isFinite(
+                dailyUv
+              )
             ? dailyUv
             : 0,
 
       aqi:
-        Number(airQuality.us_aqi) || 0,
+        Number(
+          airQuality.us_aqi
+        ) || 0,
 
       pm25:
-        Number(airQuality.pm2_5) || 0,
+        Number(
+          airQuality.pm2_5
+        ) || 0,
 
       pm10:
-        Number(airQuality.pm10) || 0,
+        Number(
+          airQuality.pm10
+        ) || 0,
 
       ozone:
-        Number(airQuality.ozone) || 0,
+        Number(
+          airQuality.ozone
+        ) || 0,
 
       timezone:
-        weatherData.timezone || "",
+        weatherData.timezone ||
+        "",
 
       capturedAt:
         weather.time ||
         airQuality.time ||
         new Date().toISOString(),
 
-      dataSource: "Open-Meteo",
+      dataSource:
+        airQualityData
+          ? "Open-Meteo Weather + Air Quality"
+          : "Open-Meteo Weather",
+
+      partialData:
+        !airQualityData,
     };
 
-    return res.status(200).json({
-      success: true,
-      environment,
-    });
+    return res
+      .status(200)
+      .json({
+        success: true,
+        environment,
+
+        warning:
+          !airQualityData
+            ? "Air-quality information is temporarily unavailable, but current weather was retrieved."
+            : null,
+      });
   } catch (error) {
     console.error(
       "Environment lookup error:",
@@ -207,10 +385,12 @@ exports.getEnvironment = async (req, res) => {
 
     return res.status(503).json({
       success: false,
+
       message:
-        error?.name === "AbortError"
+        error?.name ===
+        "AbortError"
           ? "Weather service took too long to respond."
-          : "Current weather and air-quality data could not be retrieved.",
+          : "Current environmental information could not be retrieved. Please try again shortly.",
     });
   }
 };
