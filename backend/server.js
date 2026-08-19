@@ -3,15 +3,23 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 require("dotenv").config();
 
+
 const connectDB = require("./config/db");
 
+const analysisRoutes = require("./routes/analysis");
 const authRoutes = require("./routes/auth");
 const uploadRoutes = require("./routes/upload");
 const geminiRoutes = require("./routes/gemini");
+const dashboardRoutes = require("./routes/dashboard");
+const path = require("path");
 const environmentRoutes =
   require("./routes/environment");
+  const progressRoutes =
+  require("./routes/progress");
+
 
 const app = express();
+
 
 // Connect to MongoDB
 connectDB();
@@ -57,14 +65,36 @@ app.use(express.urlencoded({ extended: true }));
 // Parse cookies such as skinsense_token
 app.use(cookieParser());
 
+
 // API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/uploads", express.static("uploads"));
 app.use("/api/gemini", geminiRoutes);
+app.use("/api/analysis", analysisRoutes);
+
+
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "uploads"))
+);
+
+app.use("/api/dashboard", dashboardRoutes);
 app.use(
   "/api/environment",
   environmentRoutes
+
+);
+
+app.use(
+  "/api/progress",
+  progressRoutes
+);
+
+
+app.use(
+  "/api/analysis",
+  analysisRoutes
 );
 
 // Backend status route

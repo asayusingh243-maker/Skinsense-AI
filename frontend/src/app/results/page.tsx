@@ -496,21 +496,33 @@ export default function ResultsPage() {
           )}`
         );
 
-        const response = await fetch(
-          "http://localhost:5000/api/gemini/analyze",
-          {
-            method: "POST",
+       const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:5000";
 
-            headers: {
-              "Content-Type": "application/json",
-            },
+const response = await fetch(
+  `${API_URL}/api/gemini/analyze`,
+  {
+    method: "POST",
 
-            body: JSON.stringify({
-              questionnaire: JSON.parse(questionnaire),
-              image: uploadedImage,
-            }),
-          }
-        );
+    /*
+     * Required so the browser sends the
+     * skinsense_token login cookie to the backend.
+     */
+    credentials: "include",
+
+    headers: {
+      "Content-Type": "application/json",
+    },
+
+    body: JSON.stringify({
+      questionnaire: JSON.parse(
+        questionnaire
+      ),
+      image: uploadedImage,
+    }),
+  }
+);
 
         const responseText = await response.text();
 

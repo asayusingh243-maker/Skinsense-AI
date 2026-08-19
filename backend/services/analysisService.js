@@ -346,7 +346,7 @@ function isQuotaError(error) {
  * @param {object} input.questionnaire User questionnaire data.
  * @returns {Promise<object>} Normalized cosmetic skin analysis.
  */
-async function analyzeSkinImage({ imagePath, questionnaire }) {
+async function analyzeSkinImage({ imagePath  }) {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error(
       "GEMINI_API_KEY is missing from the backend environment."
@@ -361,9 +361,7 @@ async function analyzeSkinImage({ imagePath, questionnaire }) {
     throw new Error("Uploaded image was not found.");
   }
 
-  if (!questionnaire || typeof questionnaire !== "object") {
-    throw new Error("Questionnaire data is required.");
-  }
+
 
   const ai = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
@@ -372,45 +370,53 @@ async function analyzeSkinImage({ imagePath, questionnaire }) {
   const imageBytes = fs.readFileSync(imagePath);
   const imageBase64 = imageBytes.toString("base64");
   const mimeType = mime.lookup(imagePath) || "image/jpeg";
-  const environment = questionnaire.environment || null;
 
-  const prompt = `
-You are a cosmetic skincare analysis assistant.
 
-Analyze the uploaded facial image together with the user's questionnaire.
+const prompt = `
+You are a cosmetic skincare visual-analysis assistant.
 
-Questionnaire:
-${JSON.stringify(questionnaire, null, 2)}
+Analyze only the uploaded facial image.
 
-Environmental context:
-${JSON.stringify(environment, null, 2)}
+Do not use questionnaire answers, user claims, weather information,
+location information, lifestyle information, product preferences,
+or any other external context.
+
+Your task is to independently report what appears visually observable
+in the photograph.
 
 Output rules:
 - Return only one JSON object matching the supplied schema.
 - Do not return Markdown or explanatory text outside the JSON.
-- Provide cosmetic skincare guidance only.
-- Do not diagnose diseases, medical conditions, or allergies.
-- Do not identify the person or infer ethnicity, religion, health history, or other sensitive traits.
+- Provide cosmetic skincare observations only.
+- Do not diagnose diseases, medical conditions, infections, or allergies.
+- Do not identify the person.
+- Do not infer ethnicity, religion, medical history, or other sensitive traits.
 - Do not claim certainty from a photograph.
-- Use cautious wording such as "appears", "may indicate", "possibly", "likely", or "uncertain".
-- Use the questionnaire to assess reported sensitivity, lifestyle, hydration, oiliness, sun exposure, and existing routine.
-- Treat environmental data only as supportive context.
-- Humidity and temperature may influence hydration and product-texture guidance.
-- UV index may influence sunscreen guidance.
-- AQI and PM2.5 may influence general cleansing and barrier-support guidance.
-- Do not claim that weather or pollution proves a medical condition.
+- Use cautious wording such as "appears", "may indicate", "possibly",
+  "likely", or "uncertain".
+- Estimate skin type only from visible oil distribution, dryness,
+  texture, shine, and other visible cosmetic indicators.
+- Estimate visible hydration cautiously.
+- Sensitivity cannot be confirmed from an image; only mention possible
+  visible signs such as apparent redness or irritation.
+- Lighting, makeup, filters, blur, camera angle, shadows, and image
+  compression may affect skin-tone, texture, pigmentation, redness,
+  pore, oiliness, and hydration estimates.
+- Include these limitations in analysisNotes whenever relevant.
+- Do not allow assumed user information to influence the visual findings.
 - Keep skinScore between 0 and 100.
 - skinScore is a general cosmetic wellness score, not a medical score.
 - Prioritize no more than five main concerns.
 - Use severity labels: none, mild, moderate, high, or uncertain.
 - Do not recommend prescription medicines.
 - Do not select product brands or specific products.
-- helpfulIngredients should contain ingredient types only.
-- avoidIngredients may include ingredients or practices that should be avoided or introduced slowly.
-- Include clear uncertainty notes when lighting, blur, makeup, angle, or image quality limits the analysis.
-- Recommend professional evaluation when there are painful, persistent, rapidly worsening, bleeding, infected-looking, or otherwise concerning symptoms.
+- helpfulIngredients should contain general ingredient types only.
+- avoidIngredients may contain ingredients or practices that should
+  be avoided or introduced slowly.
+- Recommend professional evaluation when there are painful, persistent,
+  rapidly worsening, bleeding, infected-looking, or otherwise concerning
+  symptoms.
 `;
-
   try {
     const response = await ai.models.generateContent({
       model: ANALYSIS_MODEL,
