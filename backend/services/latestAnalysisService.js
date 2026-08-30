@@ -18,10 +18,32 @@ function formatRoutine(steps) {
   }
 
   return steps.map((step, index) => ({
-    order: index + 1,
-    category: step?.category || "Skincare step",
-    instruction: step?.instruction || "",
-    completed: Boolean(step?.completed),
+    order:
+      Number.isFinite(Number(step?.step)) &&
+      Number(step.step) > 0
+        ? Number(step.step)
+        : index + 1,
+
+    category:
+      step?.category ||
+      "Skincare step",
+
+    instruction:
+      step?.instruction || "",
+
+    completed:
+      Boolean(step?.completed),
+
+    product:
+      step?.product || null,
+
+    alternatives:
+      Array.isArray(step?.alternatives)
+        ? step.alternatives
+        : [],
+
+    selectionWarning:
+      step?.selectionWarning || "",
   }));
 }
 

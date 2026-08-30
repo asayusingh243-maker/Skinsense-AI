@@ -1973,25 +1973,70 @@ function formatRoutineForDatabase(steps = []) {
     return [];
   }
 
-  return steps.map((step) => {
+  return steps.map((step, index) => {
+    // Backward compatibility in case a routine step is still a string.
     if (typeof step === "string") {
       return {
+        step: index + 1,
+        section: "",
         category: "",
         instruction: step,
         completed: false,
+        product: null,
+        alternatives: [],
+        selectionWarning: "",
       };
     }
 
+    const stepNumber = Number(step?.step);
+
     return {
+      step:
+        Number.isFinite(stepNumber) &&
+        stepNumber > 0
+          ? stepNumber
+          : index + 1,
+
+      section:
+        typeof step?.section === "string"
+          ? step.section
+          : "",
+
       category:
         step?.category ||
         step?.name ||
         "",
+
       instruction:
         step?.instruction ||
         step?.usage ||
         "",
-      completed: false,
+
+      completed:
+        Boolean(step?.completed),
+
+      // IMPORTANT:
+      // Preserve the primary product selected by productSelector.js.
+      product:
+        step?.product &&
+        typeof step.product === "object"
+          ? step.product
+          : null,
+
+      // Preserve Product Recommendation Engine v2 alternatives.
+      alternatives:
+        Array.isArray(step?.alternatives)
+          ? step.alternatives.filter(
+              (product) =>
+                product &&
+                typeof product === "object"
+            )
+          : [],
+
+      selectionWarning:
+        typeof step?.selectionWarning === "string"
+          ? step.selectionWarning
+          : "",
     };
   });
 }
