@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+
 import {
   FaArrowLeft,
   FaArrowDown,
@@ -11,6 +12,7 @@ import {
 } from "react-icons/fa";
 
 import SkinScoreTrend from "@/components/SkinScoreTrend";
+import MetricTrendChart from "@/components/MetricTrendChart";
 
 type MetricChange = {
   previous: string;
@@ -22,7 +24,19 @@ type MetricChange = {
     | "unknown";
 };
 
-
+type HistoryItem = {
+  id: string;
+  date: string;
+  skinScore: number | null;
+  skinType: string;
+  hydration: string;
+  oiliness: string;
+  sensitivity: string;
+  acne: string;
+  pigmentation: string;
+  pores: string;
+  image: string | null;
+};
 
 type ProgressData = {
   status:
@@ -58,9 +72,16 @@ type ProgressData = {
   summary: string;
 };
 
-type ApiResponse = {
+type ProgressApiResponse = {
   success: boolean;
   data?: ProgressData;
+  message?: string;
+};
+
+type HistoryApiResponse = {
+  success: boolean;
+  count?: number;
+  data?: HistoryItem[];
   message?: string;
 };
 
@@ -77,18 +98,23 @@ function formatLabel(value: string) {
     );
 }
 
-function formatDate(date?: string | null) {
+function formatDate(
+  date?: string | null
+) {
   if (!date) {
     return "Not available";
   }
 
-  return new Date(date).toLocaleString("en-IN", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return new Date(date).toLocaleString(
+    "en-IN",
+    {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }
+  );
 }
 
 function getChangeIcon(
@@ -145,7 +171,12 @@ function getChangeClass(
 
 export default function ProgressPage() {
   const [progress, setProgress] =
-    useState<ProgressData | null>(null);
+    useState<ProgressData | null>(
+      null
+    );
+
+  const [history, setHistory] =
+    useState<HistoryItem[]>([]);
 
   const [loading, setLoading] =
     useState(true);
@@ -159,6 +190,12 @@ export default function ProgressPage() {
         setLoading(true);
         setError("");
 
+        /*
+         * ----------------------------------
+         * Load latest comparison
+         * ----------------------------------
+         */
+
         const response = await fetch(
           `${API_URL}/api/progress/latest`,
           {
@@ -168,10 +205,14 @@ export default function ProgressPage() {
           }
         );
 
-        const result: ApiResponse =
+        const result:
+          ProgressApiResponse =
           await response.json();
 
-        if (!response.ok || !result.success) {
+        if (
+          !response.ok ||
+          !result.success
+        ) {
           throw new Error(
             result.message ||
               "Unable to load progress."
@@ -185,7 +226,52 @@ export default function ProgressPage() {
         }
 
         setProgress(result.data);
+
+        /*
+         * ----------------------------------
+         * Load complete history
+         * ----------------------------------
+         */
+
+        const historyResponse =
+          await fetch(
+            `${API_URL}/api/progress/history`,
+            {
+              method: "GET",
+              credentials: "include",
+              cache: "no-store",
+            }
+          );
+
+        const historyResult:
+          HistoryApiResponse =
+          await historyResponse.json();
+
+        if (
+          !historyResponse.ok ||
+          !historyResult.success
+        ) {
+          throw new Error(
+            historyResult.message ||
+              "Unable to load progress history."
+          );
+        }
+
+        if (
+          Array.isArray(
+            historyResult.data
+          )
+        ) {
+          setHistory(
+            historyResult.data
+          );
+        }
       } catch (error) {
+        console.error(
+          "Progress page error:",
+          error
+        );
+
         setError(
           error instanceof Error
             ? error.message
@@ -198,6 +284,12 @@ export default function ProgressPage() {
 
     loadProgress();
   }, []);
+
+  /*
+   * ----------------------------------
+   * Loading
+   * ----------------------------------
+   */
 
   if (loading) {
     return (
@@ -214,6 +306,12 @@ export default function ProgressPage() {
       </main>
     );
   }
+
+  /*
+   * ----------------------------------
+   * Error
+   * ----------------------------------
+   */
 
   if (error || !progress) {
     return (
@@ -232,7 +330,7 @@ export default function ProgressPage() {
             onClick={() =>
               window.location.reload()
             }
-            className="mt-6 rounded-xl bg-pink-600 px-6 py-3 font-semibold text-white hover:bg-pink-700"
+            className="mt-6 rounded-xl bg-pink-600 px-6 py-3 font-semibold text-white transition hover:bg-pink-700"
           >
             Try Again
           </button>
@@ -240,6 +338,12 @@ export default function ProgressPage() {
       </main>
     );
   }
+
+  /*
+   * ----------------------------------
+   * First scan / no scan state
+   * ----------------------------------
+   */
 
   if (
     progress.status === "no-scans" ||
@@ -253,6 +357,7 @@ export default function ProgressPage() {
             className="inline-flex items-center gap-2 font-semibold text-pink-600"
           >
             <FaArrowLeft />
+
             Back to Dashboard
           </Link>
 
@@ -269,7 +374,7 @@ export default function ProgressPage() {
 
             <Link
               href="/analyze"
-              className="mt-7 inline-block rounded-xl bg-pink-600 px-6 py-3 font-semibold text-white hover:bg-pink-700"
+              className="mt-7 inline-block rounded-xl bg-pink-600 px-6 py-3 font-semibold text-white transition hover:bg-pink-700"
             >
               Start New Analysis
             </Link>
@@ -279,43 +384,33 @@ export default function ProgressPage() {
     );
   }
 
-  const { latest, previous, overall, metrics } =
-    progress;
+  const {
+    latest,
+    previous,
+    overall,
+    metrics,
+  } = progress;
 
   const overallChange =
     overall?.change ?? 0;
 
-  const history = [
-    ...(previous && previous.skinScore !== null
-      ? [
-          {
-            id: previous.id,
-            date: previous.date,
-            skinScore: previous.skinScore,
-          },
-        ]
-      : []),
-    ...(latest && latest.skinScore !== null
-      ? [
-          {
-            id: latest.id,
-            date: latest.date,
-            skinScore: latest.skinScore,
-          },
-        ]
-      : []),
-  ];
-
   return (
     <main className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 px-5 py-8 sm:px-8">
       <div className="mx-auto max-w-7xl">
+        {/* Back button */}
+
         <Link
           href="/dashboard"
           className="inline-flex items-center gap-2 font-semibold text-pink-600 transition hover:text-pink-700"
         >
           <FaArrowLeft />
+
           Back to Dashboard
         </Link>
+
+        {/* ==================================
+            MAIN PROGRESS SUMMARY
+        ================================== */}
 
         <section className="mt-6 rounded-3xl border border-pink-100 bg-white p-6 shadow-sm md:p-10">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-pink-600">
@@ -327,25 +422,33 @@ export default function ProgressPage() {
           </h1>
 
           <p className="mt-4 max-w-3xl text-lg text-gray-600">
-            Compare your latest analysis with your
-            previous scan and track how your skin
-            condition is changing over time.
+            Compare your latest analysis
+            with your previous scan and
+            track how your skin condition
+            is changing over time.
           </p>
 
           <div className="mt-8 grid gap-5 md:grid-cols-3">
+            {/* Previous Score */}
+
             <div className="rounded-2xl bg-gray-50 p-6">
               <p className="text-sm font-semibold text-gray-500">
                 Previous Score
               </p>
 
               <p className="mt-2 text-4xl font-bold text-gray-800">
-                {overall?.previousScore ?? "N/A"}
+                {overall?.previousScore ??
+                  "N/A"}
               </p>
 
               <p className="mt-2 text-sm text-gray-500">
-                {formatDate(previous?.date)}
+                {formatDate(
+                  previous?.date
+                )}
               </p>
             </div>
+
+            {/* Current Score */}
 
             <div className="rounded-2xl bg-pink-50 p-6">
               <p className="text-sm font-semibold text-pink-600">
@@ -353,19 +456,26 @@ export default function ProgressPage() {
               </p>
 
               <p className="mt-2 text-4xl font-bold text-pink-600">
-                {overall?.currentScore ?? "N/A"}
+                {overall?.currentScore ??
+                  "N/A"}
               </p>
 
               <p className="mt-2 text-sm text-gray-500">
-                {formatDate(latest?.date)}
+                {formatDate(
+                  latest?.date
+                )}
               </p>
             </div>
 
+            {/* Score Change */}
+
             <div
               className={`rounded-2xl p-6 ${
-                overall?.status === "improved"
+                overall?.status ===
+                "improved"
                   ? "bg-green-50"
-                  : overall?.status === "declined"
+                  : overall?.status ===
+                      "declined"
                     ? "bg-red-50"
                     : "bg-gray-50"
               }`}
@@ -375,15 +485,18 @@ export default function ProgressPage() {
               </p>
 
               <div className="mt-2 flex items-center gap-3">
-                {overall?.status === "improved" && (
+                {overall?.status ===
+                  "improved" && (
                   <FaArrowUp className="text-3xl text-green-600" />
                 )}
 
-                {overall?.status === "declined" && (
+                {overall?.status ===
+                  "declined" && (
                   <FaArrowDown className="text-3xl text-red-500" />
                 )}
 
-                {overall?.status === "stable" && (
+                {overall?.status ===
+                  "stable" && (
                   <FaEquals className="text-3xl text-gray-500" />
                 )}
 
@@ -400,6 +513,8 @@ export default function ProgressPage() {
             </div>
           </div>
 
+          {/* AI Summary */}
+
           <div className="mt-7 rounded-2xl bg-purple-50 p-5">
             <p className="font-semibold text-purple-800">
               AI Progress Summary
@@ -411,24 +526,50 @@ export default function ProgressPage() {
           </div>
         </section>
 
-        {/* Skin Score History Chart */}
+        {/* ==================================
+            SKIN SCORE TREND
+        ================================== */}
+
         <div className="mt-8">
-          <SkinScoreTrend history={history} />
+          <SkinScoreTrend
+            history={history}
+          />
         </div>
 
-        {/* Metric Comparison */}
+        {/* ==================================
+            ALL METRIC TRENDS
+        ================================== */}
+
+        <div className="mt-8">
+          <MetricTrendChart
+            history={history}
+          />
+        </div>
+
+        {/* ==================================
+            LATEST METRIC COMPARISON
+        ================================== */}
+
         <section className="mt-8">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-purple-600">
               Metric Comparison
             </p>
+
             <h2 className="mt-2 text-3xl font-bold text-gray-900">
               What changed?
             </h2>
+
+            <p className="mt-2 text-gray-500">
+              Compare your latest analysis
+              with the previous one.
+            </p>
           </div>
 
           <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {Object.entries(metrics).map(
+            {Object.entries(
+              metrics
+            ).map(
               ([name, metric]) => (
                 <article
                   key={name}
@@ -436,7 +577,9 @@ export default function ProgressPage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="text-xl font-bold text-gray-800">
-                      {formatLabel(name)}
+                      {formatLabel(
+                        name
+                      )}
                     </h3>
 
                     <span
@@ -451,15 +594,21 @@ export default function ProgressPage() {
                   </div>
 
                   <div className="mt-6 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                    {/* Previous */}
+
                     <div className="rounded-2xl bg-gray-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                         Previous
                       </p>
 
                       <p className="mt-1 font-bold capitalize text-gray-800">
-                        {metric.previous}
+                        {
+                          metric.previous
+                        }
                       </p>
                     </div>
+
+                    {/* Arrow */}
 
                     <div className="flex justify-center">
                       {getChangeIcon(
@@ -467,13 +616,17 @@ export default function ProgressPage() {
                       )}
                     </div>
 
+                    {/* Current */}
+
                     <div className="rounded-2xl bg-pink-50 p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-pink-600">
                         Current
                       </p>
 
                       <p className="mt-1 font-bold capitalize text-gray-800">
-                        {metric.current}
+                        {
+                          metric.current
+                        }
                       </p>
                     </div>
                   </div>
@@ -483,17 +636,21 @@ export default function ProgressPage() {
           </div>
         </section>
 
+        {/* ==================================
+            NAVIGATION
+        ================================== */}
+
         <div className="mt-10 flex flex-wrap justify-center gap-4">
           <Link
             href="/dashboard"
-            className="rounded-xl border border-pink-300 px-6 py-3 font-semibold text-pink-600 hover:bg-pink-50"
+            className="rounded-xl border border-pink-300 px-6 py-3 font-semibold text-pink-600 transition hover:bg-pink-50"
           >
             Back to Dashboard
           </Link>
 
           <Link
             href="/analyze"
-            className="rounded-xl bg-pink-600 px-6 py-3 font-semibold text-white hover:bg-pink-700"
+            className="rounded-xl bg-pink-600 px-6 py-3 font-semibold text-white transition hover:bg-pink-700"
           >
             Start New Analysis
           </Link>

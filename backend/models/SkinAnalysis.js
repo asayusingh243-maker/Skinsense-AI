@@ -2,17 +2,44 @@ const mongoose = require("mongoose");
 
 const routineStepSchema = new mongoose.Schema(
   {
+    step: {
+      type: Number,
+      default: null,
+    },
+
+    section: {
+      type: String,
+      default: "",
+    },
+
     category: {
       type: String,
       default: "",
     },
+
     instruction: {
       type: String,
       default: "",
     },
+
     completed: {
       type: Boolean,
       default: false,
+    },
+
+    product: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    alternatives: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    selectionWarning: {
+      type: String,
+      default: "",
     },
   },
   {

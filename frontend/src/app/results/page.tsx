@@ -538,9 +538,29 @@ const response = await fetch(
         }
 
         if (!response.ok) {
+          if (response.status === 503) {
+            throw new Error(
+              "SkinSense AI is temporarily busy because the analysis service is experiencing high demand. Please try again in a moment."
+            );
+          }
+
+          if (response.status === 429) {
+            throw new Error(
+              "Too many analysis requests were sent in a short time. Please wait a little and try again."
+            );
+          }
+
+          const backendMessage =
+            typeof data?.message === "string"
+              ? data.message
+              : typeof data?.error === "string"
+                ? data.error
+                : typeof data?.error?.message === "string"
+                  ? data.error.message
+                  : "";
+
           throw new Error(
-            data.message ||
-              data.error ||
+            backendMessage ||
               `Server Error (${response.status})`
           );
         }
