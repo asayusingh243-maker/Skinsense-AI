@@ -1041,8 +1041,527 @@ const productCatalog = [
     buyUrl:
       "https://beminimalist.co/products/retinol-0-3-q10",
   },
-];
 
-module.exports = productCatalog;
+    /* -------------------------------------------------------------------------- */
+  /*                     EXPANDED MULTI-BRAND PRODUCT CATALOG                   */
+  /* -------------------------------------------------------------------------- */
+
+  /*
+   * CeraVe Hydrating Cleanser
+   * Alternative gentle cleanser for dry, normal and sensitive skin.
+   */
+  {
+    id: "cerave-hydrating-cleanser",
+
+    brand: "CeraVe",
+
+    name: "Hydrating Cleanser",
+
+    category: "Cleanser",
+
+    size: "",
+
+    price: 0,
+    originalPrice: 0,
+    currency: "INR",
+
+    seller: "CeraVe India Official Website",
+
+    skinTypes: [
+      "dry",
+      "normal",
+      "sensitive",
+    ],
+
+    concerns: [
+      "dryness",
+      "dehydration",
+      "tightness",
+      "sensitivity",
+      "damaged skin barrier",
+      "weakened skin barrier",
+    ],
+
+    benefits: [
+      "Cleanses without aggressively stripping the skin",
+      "Supports dry and dehydrated skin",
+      "Supports the skin barrier",
+      "Suitable for a gentle everyday cleansing routine",
+    ],
+
+    keyIngredients: [
+      "Ceramides",
+      "Hyaluronic Acid",
+    ],
+
+    beginnerFriendly: true,
+
+    sensitivityLevel: "low",
+
+    routineSlots: [
+      "morning-cleanser",
+      "night-cleanser",
+    ],
+
+    incompatibleWith: [],
+
+    pregnancyRestricted: false,
+
+    usage:
+      "Massage gently onto wet skin and rinse thoroughly. Use in the morning and evening according to skin tolerance.",
+
+    warnings: [
+      "Patch-test before regular use.",
+      "Avoid direct contact with the eyes.",
+      "Stop use if persistent irritation occurs.",
+    ],
+
+    buyUrl:
+      "https://www.ceraveindia.com/ceramides-skin-care/cleansers/hydrating-cleanser",
+  },
+
+  /*
+   * CeraVe Foaming Cleanser
+   * Gives oily/combination users another cleanser option instead
+   * of repeatedly returning Cetaphil Oily Skin Cleanser.
+   */
+  {
+    id: "cerave-foaming-cleanser",
+
+    brand: "CeraVe",
+
+    name: "Foaming Cleanser",
+
+    category: "Cleanser",
+
+    size: "",
+
+    price: 0,
+    originalPrice: 0,
+    currency: "INR",
+
+    seller: "CeraVe India Official Website",
+
+    skinTypes: [
+      "normal",
+      "oily",
+      "combination",
+    ],
+
+    concerns: [
+      "oiliness",
+      "excess oil",
+      "visible pores",
+      "enlarged pores",
+      "acne-prone skin",
+    ],
+
+    benefits: [
+      "Helps cleanse excess oil",
+      "Supports the skin barrier",
+      "Suitable for normal-to-oily skin",
+      "Provides an alternative to stronger acne cleansers",
+    ],
+
+    keyIngredients: [
+      "Ceramides",
+      "Niacinamide",
+      "Hyaluronic Acid",
+    ],
+
+    beginnerFriendly: true,
+
+    sensitivityLevel: "low",
+
+    routineSlots: [
+      "morning-cleanser",
+      "night-cleanser",
+    ],
+
+    incompatibleWith: [],
+
+    pregnancyRestricted: false,
+
+    usage:
+      "Massage gently onto wet skin until it foams and rinse thoroughly. Use once or twice daily according to skin tolerance.",
+
+    warnings: [
+      "Patch-test before regular use.",
+      "Reduce cleansing frequency if the skin becomes dry or tight.",
+      "Avoid direct contact with the eyes.",
+    ],
+
+    buyUrl:
+      "https://www.ceraveindia.com/ceramides-skin-care/cleansers/foaming-cleanser",
+  },
+
+  /*
+   * CeraVe Moisturising Lotion
+   */
+  {
+    id: "cerave-moisturising-lotion",
+
+    brand: "CeraVe",
+
+    name: "Moisturising Lotion",
+
+    category: "Moisturizer",
+
+    treatmentType: "Ceramides",
+
+    size: "",
+
+    price: 0,
+    originalPrice: 0,
+    currency: "INR",
+
+    seller: "CeraVe India Official Website",
+
+    skinTypes: [
+      "dry",
+      "normal",
+      "sensitive",
+    ],
+
+    concerns: [
+      "dryness",
+      "dehydration",
+      "tightness",
+      "sensitivity",
+      "damaged skin barrier",
+      "weakened skin barrier",
+    ],
+
+    benefits: [
+      "Supports the skin barrier",
+      "Helps maintain skin hydration",
+      "Suitable for dry and sensitive skin",
+      "Supports a simple beginner-friendly routine",
+    ],
+
+    keyIngredients: [
+      "Ceramides",
+      "Hyaluronic Acid",
+    ],
+
+    beginnerFriendly: true,
+
+    sensitivityLevel: "low",
+
+    routineSlots: [
+      "morning-moisturizer",
+      "night-moisturizer",
+    ],
+
+    incompatibleWith: [],
+
+    pregnancyRestricted: false,
+
+    usage:
+      "Apply to clean skin after serums or treatment products. Use in the morning and evening.",
+
+    warnings: [
+      "Patch-test before regular use.",
+      "Stop use if persistent irritation occurs.",
+    ],
+
+    buyUrl:
+      "https://www.ceraveindia.com/ceramides-skin-care/moisturisers/moisturising-lotion",
+  },
+
+  /*
+   * CeraVe Hyaluronic Acid Water Gel
+   * Lightweight hydration option.
+   */
+  {
+    id: "cerave-hydrating-ha-water-gel",
+
+    brand: "CeraVe",
+
+    name: "Hydrating Hyaluronic Acid Water Gel Moisturizer",
+
+    category: "Moisturizer",
+
+    treatmentType: "Hyaluronic Acid",
+
+    size: "",
+
+    price: 0,
+    originalPrice: 0,
+    currency: "INR",
+
+    seller: "CeraVe India Official Website",
+
+    skinTypes: [
+      "dry",
+      "normal",
+      "oily",
+      "combination",
+      "sensitive",
+    ],
+
+    concerns: [
+      "dehydration",
+      "dryness",
+      "tightness",
+      "sensitivity",
+      "damaged skin barrier",
+    ],
+
+    benefits: [
+      "Provides lightweight hydration",
+      "Supports the skin barrier",
+      "Suitable when a lighter moisturizer is preferred",
+      "Helps support dehydrated skin",
+    ],
+
+    keyIngredients: [
+      "Hyaluronic Acid",
+      "Ceramides",
+      "Niacinamide",
+    ],
+
+    beginnerFriendly: true,
+
+    sensitivityLevel: "low",
+
+    routineSlots: [
+      "morning-moisturizer",
+      "night-moisturizer",
+    ],
+
+    incompatibleWith: [],
+
+    pregnancyRestricted: false,
+
+    usage:
+      "Apply after cleansing and treatment products. In the morning, follow with sunscreen.",
+
+    warnings: [
+      "Patch-test before regular use.",
+      "Stop use if persistent irritation occurs.",
+    ],
+
+    buyUrl:
+      "https://www.ceraveindia.com/ceramides-skin-care/moisturisers/hydrating-hyaluronic-acid-water-gel-moisturizer",
+  },
+
+  /*
+   * CeraVe PM Facial Moisturising Lotion
+   */
+  {
+    id: "cerave-pm-facial-moisturising-lotion",
+
+    brand: "CeraVe",
+
+    name: "PM Facial Moisturising Lotion",
+
+    category: "Moisturizer",
+
+    treatmentType: "Ceramides",
+
+    size: "",
+
+    price: 0,
+    originalPrice: 0,
+    currency: "INR",
+
+    seller: "CeraVe India Official Website",
+
+    skinTypes: [
+      "dry",
+      "normal",
+      "combination",
+      "sensitive",
+    ],
+
+    concerns: [
+      "dryness",
+      "dehydration",
+      "sensitivity",
+      "damaged skin barrier",
+      "weakened skin barrier",
+    ],
+
+    benefits: [
+      "Supports overnight hydration",
+      "Supports the skin barrier",
+      "Suitable for sensitive skin",
+      "Pairs with many common skincare treatments",
+    ],
+
+    keyIngredients: [
+      "Ceramides",
+      "Niacinamide",
+      "Hyaluronic Acid",
+    ],
+
+    beginnerFriendly: true,
+
+    sensitivityLevel: "low",
+
+    routineSlots: [
+      "night-moisturizer",
+    ],
+
+    incompatibleWith: [],
+
+    pregnancyRestricted: false,
+
+    usage:
+      "Apply after cleansing and treatment products as the moisturizing step of the evening routine.",
+
+    warnings: [
+      "Patch-test before regular use.",
+      "Stop use if persistent irritation occurs.",
+    ],
+
+    buyUrl:
+      "https://www.ceraveindia.com/ceramides-skin-care/moisturisers/facial-moisturising-lotion-pm",
+  },
+
+  /*
+   * CeraVe SPF option
+   */
+  {
+    id: "cerave-am-facial-moisturising-lotion-spf50",
+
+    brand: "CeraVe",
+
+    name: "AM Facial Moisturising Lotion with SPF 50",
+
+    category: "Sunscreen",
+
+    size: "",
+
+    price: 0,
+    originalPrice: 0,
+    currency: "INR",
+
+    seller: "CeraVe India Official Website",
+
+    skinTypes: [
+      "dry",
+      "normal",
+      "combination",
+      "sensitive",
+    ],
+
+    concerns: [
+      "sun damage",
+      "dryness",
+      "dehydration",
+      "sensitivity",
+      "damaged skin barrier",
+    ],
+
+    benefits: [
+      "Provides daily broad-spectrum sun protection",
+      "Supports skin hydration",
+      "Supports the skin barrier",
+      "Combines moisturizing and sun-protection steps",
+    ],
+
+    keyIngredients: [
+      "UV Filters",
+      "Ceramides",
+      "Niacinamide",
+      "Hyaluronic Acid",
+    ],
+
+    beginnerFriendly: true,
+
+    sensitivityLevel: "low",
+
+    routineSlots: [
+      "morning-sunscreen",
+    ],
+
+    incompatibleWith: [],
+
+    pregnancyRestricted: false,
+
+    usage:
+      "Apply generously to the face and neck as the final step of the morning routine. Reapply regularly when outdoors.",
+
+    warnings: [
+      "Patch-test before regular use.",
+      "Avoid direct contact with the eyes.",
+      "Reapply after swimming, sweating or towel drying.",
+    ],
+
+    buyUrl:
+      "https://www.ceraveindia.com/ceramides-skin-care/moisturisers/facial-moisturising-lotion-with-spf-50",
+  },
+
+  /*
+   * Re'equil sunscreen
+   * Adds another brand to the sunscreen candidate pool.
+   */
+  {
+    id: "reequil-ultra-matte-dry-touch-sunscreen",
+
+    brand: "Re'equil",
+
+    name: "Ultra Matte Dry Touch Sunscreen SPF 50 PA++++",
+
+    category: "Sunscreen",
+
+    size: "50 g",
+
+    price: 0,
+    originalPrice: 0,
+    currency: "INR",
+
+    seller: "Re'equil Official Website",
+
+    skinTypes: [
+      "normal",
+      "oily",
+      "combination",
+    ],
+
+    concerns: [
+      "sun damage",
+      "oiliness",
+      "excess oil",
+      "visible pores",
+    ],
+
+    benefits: [
+      "Provides high sun protection",
+      "Suitable when a matte sunscreen finish is preferred",
+      "Provides an alternative sunscreen for oily and combination skin",
+    ],
+
+    keyIngredients: [
+      "UV Filters",
+    ],
+
+    beginnerFriendly: true,
+
+    sensitivityLevel: "medium",
+
+    routineSlots: [
+      "morning-sunscreen",
+    ],
+
+    incompatibleWith: [],
+
+    pregnancyRestricted: false,
+
+    usage:
+      "Apply generously to the face and neck as the final morning skincare step. Reapply every two to three hours when outdoors.",
+
+    warnings: [
+      "Patch-test before regular use.",
+      "Avoid direct contact with the eyes.",
+      "Reapply after swimming, sweating or towel drying.",
+    ],
+
+    buyUrl:
+      "https://www.reequil.com/products/ultra-matte-dry-touch-sunscreen-gel-spf-50-pa",
+  },
+];
 
 module.exports = productCatalog;
